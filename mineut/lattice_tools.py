@@ -224,6 +224,7 @@ def create_RLA_lattice(
     p0_injection=1.25,
     dp_dx_LA=0.1,
     half=True,
+    beam_dyn=True,
     **kwargs,
 ):
     """
@@ -526,23 +527,47 @@ def create_RLA_lattice(
     s = np.concatenate([[0], np.cumsum(ds_length)])
     u = s / s[-1]
 
-    # define piecewise beta: example linear on straights, zero on arcs
-    beta = np.zeros_like(s)
-    # example user parameters for the straight segments (a,b) per straight pass
-    # these are just examples — replace with your desired a,b values per straight
-    straight_params = [
-        [0.000000e00, 8.290000e04],  # seg 1  (s_start, s_end)
-        [2.805025e05, 3.634025e05],  # seg 9
-        [5.809080e05, 6.638080e05],  # seg 17
-        [9.264227e05, 1.009323e06],  # seg 25
-        [1.380230e06, s[-1]],  # seg 33 (final straight)
-    ]
+    # define piecewise beta: example linear on straights, close to zero on arcs
+    beta = np.full_like(s,1e-3)
 
-    for seg in straight_params:
+    if beam_dyn:
+        
+        # example user parameters for the straight segments (a,b) per straight pass
+        # these are just examples — replace with your desired a,b values per straight
+        straight_params = [
+            [0.000000e00, 8.290000e04],  # seg 1  (s_start, s_end)
+            [2.805025e05, 3.634025e05],  # seg 9
+            [5.809080e05, 6.638080e05],  # seg 17
+            [9.264227e05, 1.009323e06],  # seg 25
+            [1.380230e06, s[-1]],  # seg 33 (final straight)
+        ]
 
-        mask = (s >= seg[0]) & (s <= seg[1])
-        beta[mask] = 0.0105498 * s[mask] + 21.5768e2
-    print(beta)
+        for seg in straight_params:
+
+            mask = (s >= seg[0]) & (s <= seg[1])
+            beta[mask] = 0.0105498 * s[mask] + 21.5768e2
+        print(beta)
+
+        emittance = 25e-3  # [cm-rad]
+
+        beamsize = np.sqrt(beta * emittance)
+        # prevent divide-by-zero
+        beamdiv = np.where(beta < 1.0, beta, np.sqrt(emittance / beta))
+
+        # ---------------------------------------
+        # Store as interpolation functions
+        # ---------------------------------------
+        # kwargs["beta"] = interp1d(u, beta, fill_value="extrapolate")
+        kwargs["beamsize_x"] = interp1d(u, beamsize, fill_value="extrapolate")
+        kwargs["beamdiv_x"] = interp1d(u, beamdiv, fill_value="extrapolate")
+
+        # You can copy these to y if symmetric:
+        kwargs["beamsize_y"] = kwargs["beamsize_x"]
+        kwargs["beamdiv_y"] = kwargs["beamdiv_x"]
+
+    lattice_dict = create_lattice_dict_from_vertices(
+        (x_RLA, y_RLA), n_elements=n_elements
+    )
 
     kwargs["beam_p0"] = interp1d(
         u, np.append([p0_injection], p0_injection + np.cumsum(dpdx * ds_length))
@@ -552,26 +577,6 @@ def create_RLA_lattice(
 
     kwargs["n_elements"] = n_elements
 
-    emittance = 25e-3  # [cm-rad]
-
-    beamsize = np.sqrt(beta * emittance)
-    # prevent divide-by-zero
-    beamdiv = np.where(beta < 1.0, beta, np.sqrt(emittance / beta))
-
-    # ---------------------------------------
-    # Store as interpolation functions
-    # ---------------------------------------
-    # kwargs["beta"] = interp1d(u, beta, fill_value="extrapolate")
-    kwargs["beamsize_x"] = interp1d(u, beamsize, fill_value="extrapolate")
-    kwargs["beamdiv_x"] = interp1d(u, beamdiv, fill_value="extrapolate")
-
-    # You can copy these to y if symmetric:
-    kwargs["beamsize_y"] = kwargs["beamsize_x"]
-    kwargs["beamdiv_y"] = kwargs["beamdiv_x"]
-
-    lattice_dict = create_lattice_dict_from_vertices(
-        (x_RLA, y_RLA), n_elements=n_elements
-    )
     # Any additional user-input
     lattice_dict.update(kwargs)
 
@@ -705,6 +710,7 @@ def append_lattices(
         lattice.Nmu_per_bunch = Nmu_per_bunch_inj
         print("is different; lattice nmu per bunch is:", lattice.Nmu_per_bunch)
 
+    return lattice
 
 #     lattice = Lattice(**lattice_dict)
 #     lattice.vertices = (x_racetrack, y_racetrack)
