@@ -989,16 +989,21 @@ def create_smoothed_lattice(df, emittance_RMS=1e-6, n_elements=None, **kwargs):
     smooth_curve_dispersion_Dx = np.array([])
     smooth_curve_dispersion_Dpx = np.array([])
 
+    # Calculating the distance between elements
+    # NOTE: We do not go off of the L column in the TFS file; we recalculate based on positions S.
+    for i in range(1, n_elements_current):
+        df.loc[i, "dL"] = df["S"][i] - df["S"][i - 1]
+
     for i in range(0, n_elements_current):
         # for i in list(range(n_elements_current-200,n_elements_current)):
-        x, y, ell = df["x"][i], df["y"][i], df["L"][i]
+        x, y, ell = df["x"][i], df["y"][i], df["dL"][i]
         s = df["S"][i] - ell
         px, py = df["px"][i], df["py"][i]
         dtheta = df["ANGLE"][i]
         # theta_p = np.arctan2(py, px)
         # r_arc = l / dtheta
 
-        if df["L"][i] > 0:
+        if df["dL"][i] > 0:
             n_discrete_bend = int(ell / ds)
             if n_discrete_bend < 1:
                 n_discrete_bend = 1
