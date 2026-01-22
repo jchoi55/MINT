@@ -528,10 +528,10 @@ def create_RLA_lattice(
     u = s / s[-1]
 
     # define piecewise beta: example linear on straights, close to zero on arcs
-    beta = np.full_like(s,1e-3)
+    beta = np.full_like(s, 1e-3)
 
     if beam_dyn:
-        
+
         # example user parameters for the straight segments (a,b) per straight pass
         # these are just examples — replace with your desired a,b values per straight
         straight_params = [
@@ -712,6 +712,7 @@ def append_lattices(
 
     return lattice
 
+
 #     lattice = Lattice(**lattice_dict)
 #     lattice.vertices = (x_racetrack, y_racetrack)
 
@@ -862,6 +863,54 @@ def create_lattice_dict_from_vertices(vertices, n_elements=None):
     return lattice_dict
 
 
+def concatenate_lattice_dfs(df1, df2, x_shift=None, y_shift=None):
+    """Concatenate two lattice dataframes by shifting the x values of the second dataframe.
+
+
+    Parameters
+    ----------
+    df1 : pd.DataFrame
+        The first lattice dataframe.
+    df2 : pd.DataFrame
+        The second lattice dataframe to be shifted and concatenated.
+    x_shift : float, optional
+        The amount to shift the x values of df2. If None, uses the max x value from df1.
+    y_shift : float, optional
+        The amount to shift the y values of df2. If None, uses the max y value from df1.
+
+    NOTE: the attrs of df1 are preserved; attrs of df2 are discarded.
+
+    Returns
+    -------
+    pd.DataFrame
+        The concatenated lattice dataframe.
+    """
+
+    # Concatenate the two dataframes with shifted x values
+    df1 = df1.copy()
+    df2 = df2.copy()
+
+    # Get the max x value from the straight lattice to use for shifting
+    if x_shift is None:
+        x_shift = df1["x"].max()
+    if y_shift is None:
+        y_shift = df1["y"].max()
+
+    # Shift x, y, and S values
+    df2["x"] = df2["x"] + x_shift
+    df2["y"] = df2["y"] + y_shift
+    # Shift S coordinate to continue from where df1 ended
+    s_shift = df1["S"].max()
+    df2["S"] = df2["S"] + s_shift
+
+    # Concatenate the dataframes
+    df_combined = pd.concat([df1, df2], ignore_index=True)
+    df_combined.attrs = df1.attrs
+
+    del df1, df2
+    return df_combined
+
+
 def get_lattice_dataframe_from_tfs(filename):
     # Initialize lists to store metadata and column data
     metadata = {}
@@ -1002,25 +1051,29 @@ def create_smoothed_lattice(df, emittance_RMS=1e-6, n_elements=None, **kwargs):
 
     for i in range(0, n_elements_current):
         # for i in list(range(n_elements_current-200,n_elements_current)):
-        x, y, ell = df["x"][i], df["y"][i], df["dL"][i]
+        x, y, ell = df["x"][i], df["y"][i], df["L"][i]
         s = df["S"][i] - ell
         px, py = df["px"][i], df["py"][i]
         dtheta = df["ANGLE"][i]
         # theta_p = np.arctan2(py, px)
         # r_arc = l / dtheta
 
-        if df["dL"][i] > 0:
+        if df["L"][i] > 0:
             n_discrete_bend = int(ell / ds)
             if n_discrete_bend < 1:
                 n_discrete_bend = 1
             x0, y0, px0, py0 = x, y, px, py
+
             for j in range(n_discrete_bend):
                 xn, yn, pxn, pyn = advance_in_pos_and_momentum(
                     x0, y0, px0, py0, dtheta / n_discrete_bend, ell / n_discrete_bend
                 )
                 theta_pn = np.arctan2(pyn, pxn)
 
-                smooth_curve_s = np.append(smooth_curve_s, (s + ds * j) * const.m_to_cm)
+                # Arc length position: s is the start of element i, then we add the distance traversed
+                # through the element for each subdivision
+                s_position = s + (ell / n_discrete_bend) * (j + 1)
+                smooth_curve_s = np.append(smooth_curve_s, s_position * const.m_to_cm)
                 smooth_curve_x = np.append(smooth_curve_x, xn * const.m_to_cm)
                 smooth_curve_y = np.append(smooth_curve_y, yn * const.m_to_cm)
                 smooth_curve_angle_of_central_p = np.append(
