@@ -83,6 +83,12 @@ class Lattice:
         else:
             self.dpdx = lambda x: 0
 
+        # idenfity which pass
+        if "which_pass" in lattice_dict:
+            self.which_pass = lattice_dict.pop("which_pass")
+        else:
+            self.which_pass = lambda x: 1
+
         # Making sure everyone is callable
         for attr in [
             "beam_p0",
@@ -247,6 +253,7 @@ def create_RLA_lattice(
 
     s_length = np.array([0])
     dpdx = np.array([])
+    which_pass = np.array([])
 
     # first pass
     markers_1 = np.array([(0.161586 * straight_length) + (straight_length / 2)])
@@ -302,6 +309,7 @@ def create_RLA_lattice(
     s_length = np.append(s_length, get_s_element(x_1_6, y_1_6))
 
     dpdx = np.append(dpdx, np.full(7 * n_points_per_element, 0.0))
+    which_pass = np.full_like(dpdx, 1)
 
     # second pass
 
@@ -313,6 +321,7 @@ def create_RLA_lattice(
     y_2 = np.full_like(x_2, 0)
     s_length = np.append(s_length, get_s_element(x_2, y_2))
     dpdx = np.append(dpdx, np.full(n_points_per_element, dp_dx_LA))
+    which_pass = np.append(which_pass, np.full(n_points_per_element, 2))
 
     x_2_1 = np.linspace(-straight_length / 2, markers_2[0], n_points_per_element)
     y_2_1 = -0.210437 * x_2_1 - (0.105218 * straight_length)
@@ -347,6 +356,7 @@ def create_RLA_lattice(
     s_length = np.append(s_length, get_s_element(x_2_6, y_2_6))
 
     dpdx = np.append(dpdx, np.full(7 * n_points_per_element, 0.0))
+    which_pass = np.append(which_pass, np.full(7 * n_points_per_element, 2))
 
     # third pass
 
@@ -358,6 +368,7 @@ def create_RLA_lattice(
     y_3 = np.full_like(x_3, 0)
     s_length = np.append(s_length, get_s_element(x_3, y_3))
     dpdx = np.append(dpdx, np.full(n_points_per_element, dp_dx_LA))
+    which_pass = np.append(which_pass, np.full(n_points_per_element, 3))
 
     x_3_1 = np.linspace(straight_length / 2, markers_3[0], n_points_per_element)
     y_3_1 = 0.0968204 * x_3_1 - (0.0484102 * straight_length)
@@ -392,6 +403,7 @@ def create_RLA_lattice(
     s_length = np.append(s_length, get_s_element(x_3_6, y_3_6))
 
     dpdx = np.append(dpdx, np.full(7 * n_points_per_element, 0.0))
+    which_pass = np.append(which_pass, np.full(7 * n_points_per_element, 3))
 
     # fourth pass
 
@@ -403,6 +415,7 @@ def create_RLA_lattice(
     y_4 = np.full_like(x_4, 0)
     s_length = np.append(s_length, get_s_element(x_4, y_4))
     dpdx = np.append(dpdx, np.full(n_points_per_element, dp_dx_LA))
+    which_pass = np.append(which_pass, np.full(n_points_per_element, 4))
 
     x_4_1 = np.linspace(-straight_length / 2, markers_4[0], n_points_per_element)
     y_4_1 = -0.0848675 * x_4_1 - (0.0424337 * straight_length)
@@ -437,12 +450,14 @@ def create_RLA_lattice(
     s_length = np.append(s_length, get_s_element(x_4_6, y_4_6))
 
     dpdx = np.append(dpdx, np.full(7 * n_points_per_element, 0.0))
+    which_pass = np.append(which_pass, np.full(7 * n_points_per_element, 4))
 
     # Fifth and final pass
     x_5 = np.linspace(straight_length / 2, -straight_length / 2, n_points_per_element)
     y_5 = np.full_like(x_5, 0)
     s_length = np.append(s_length, get_s_element(x_5, y_5))
     dpdx = np.append(dpdx, np.full(n_points_per_element, dp_dx_LA))
+    which_pass = np.append(which_pass, np.full(n_points_per_element, 5))
 
     # Concatenate all segments
     x_RLA = np.concatenate(
@@ -574,6 +589,8 @@ def create_RLA_lattice(
     )
 
     kwargs["dpdx"] = interp1d(u, np.append(dpdx, dpdx[-1]), bounds_error=True)
+
+    kwargs["which_pass"] = interp1d(u, which_pass, bounds_error=True, kind='nearest')
 
     kwargs["n_elements"] = n_elements
 
@@ -998,7 +1015,7 @@ def get_lattice_dataframe_from_tfs(filename):
 
 
 # ds in meters
-def create_smoothed_lattice(df, emittance_RMS=1e-6, n_elements=None, **kwargs):
+def create_smoothed_lattice(df, emittance_RMS=1e-6, midpoint=False, n_elements=None, **kwargs):
     """
     Create a smooth lattice representation from an existing lattice DataFrame.
     Parameters
@@ -1025,7 +1042,7 @@ def create_smoothed_lattice(df, emittance_RMS=1e-6, n_elements=None, **kwargs):
         n_elements = n_elements_current
 
     # element of length in new smoother lattice
-    ds = df["S"].max() / n_elements
+    ds = df["L"].sum() / n_elements
 
     # All desired units are cm or seconds or radians
     smooth_curve_x = np.array([])
@@ -1045,14 +1062,16 @@ def create_smoothed_lattice(df, emittance_RMS=1e-6, n_elements=None, **kwargs):
     smooth_curve_dispersion_Dpx = np.array([])
 
     # Calculating the distance between elements
-    # NOTE: We do not go off of the L column in the TFS file; we recalculate based on positions S.
-    for i in range(1, n_elements_current):
-        df.loc[i, "dL"] = df["S"][i] - df["S"][i - 1]
-
+    # Note: depending on whether s is measured from the endpoints or midpoint, use L or S
     for i in range(0, n_elements_current):
-        # for i in list(range(n_elements_current-200,n_elements_current)):
         x, y, ell = df["x"][i], df["y"][i], df["L"][i]
-        s = df["S"][i] - ell
+        if midpoint:
+            #case if midpoint is used for S
+            s = df["S"][i] - (0.5*ell)
+        
+        else:
+            s = df["S"][i] - ell
+        
         px, py = df["px"][i], df["py"][i]
         dtheta = df["ANGLE"][i]
         # theta_p = np.arctan2(py, px)
