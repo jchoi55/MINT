@@ -619,6 +619,7 @@ def append_lattices(
     lattice2,
     vert_shift,
     hor_shift,
+    RLA=False, #determine if we are adding an RLA lattice (if so, we need to handle which_pass differently)
     p0_injection=0.255,
     Nmu_per_bunch_inj=2e12,
     **kwargs,
@@ -695,6 +696,24 @@ def append_lattices(
     )
 
     kwargs["dpdx"] = interp1d(u_total, dpdx)
+
+    if RLA == True:
+        # Handle which_pass: offset lattice2's passes so they follow lattice1
+        which_pass_1 = lattice1.which_pass(u1)
+        which_pass_2 = lattice2.which_pass(u2)
+        max_pass_1 = np.max(which_pass_1)
+        which_pass_2_offset = which_pass_2 + max_pass_1
+        which_pass_trans = np.full_like(transitionx, which_pass_1[-1])
+        which_pass_combined = np.concatenate((which_pass_1, which_pass_trans, which_pass_2_offset))
+        kwargs["which_pass"] = interp1d(u_total, which_pass_combined, bounds_error=False, kind='nearest', fill_value='extrapolate')
+    else:
+        # if we are combining a linac and RLA, the pass is 0 for the linac and then RLA's pass number
+        which_pass_2 = lattice2.which_pass(u2)
+        linac_pass = np.full_like(u1, 0)
+        which_pass_trans = np.full_like(transitionx, 0)
+        which_pass_combined = np.concatenate((linac_pass, which_pass_trans, which_pass_2))
+        kwargs["which_pass"] = interp1d(u_total, which_pass_combined, bounds_error=False, kind='nearest', fill_value='extrapolate')
+        
 
     lattice_dict = create_lattice_dict_from_vertices(
         (xvals, yvals, zvals), n_elements=len(xvals)
@@ -1015,7 +1034,7 @@ def get_lattice_dataframe_from_tfs(filename):
 
 
 # ds in meters
-def create_smoothed_lattice(df, emittance_RMS=1e-6, midpoint=False, n_elements=None, **kwargs):
+def create_smoothed_lattice(df, emittance_RMS=1e-6, midpoint=False, n_elements=None, rotated=False, if_sublattice=False, **kwargs):
     """
     Create a smooth lattice representation from an existing lattice DataFrame.
     Parameters
@@ -1026,6 +1045,12 @@ def create_smoothed_lattice(df, emittance_RMS=1e-6, midpoint=False, n_elements=N
         RMS emittance value to calculate beam sizes.
     n_elements : int
         Number of elements in the new smoother lattice.
+    rotated : bool
+        If True, rotate and shift the lattice so that the center of the straight section is at (0,0) 
+        and horizontal. Assumes symmetry about the middle element.
+    if_sublattice : bool
+        If True, treats the given lattice as just the interaction region and closes it by drawing
+        straight lines from the rightmost point to (0, -4.321E8) and back to the leftmost point.
     Returns
     -------
     lattice_dict : dict
@@ -1125,6 +1150,102 @@ def create_smoothed_lattice(df, emittance_RMS=1e-6, midpoint=False, n_elements=N
                 )
 
                 x0, y0, px0, py0 = xn, yn, pxn, pyn
+
+    # Apply rotation and centering if requested
+    if rotated:
+        # Find the center of the lattice (middle element)
+        center_idx = len(smooth_curve_s) // 2
+        x_center = smooth_curve_x[center_idx]
+        y_center = smooth_curve_y[center_idx]
+        angle_at_center = smooth_curve_angle_of_central_p[center_idx]
+        
+        # Rotate all points by -angle_at_center to make center horizontal
+        cos_angle = np.cos(-angle_at_center)
+        sin_angle = np.sin(-angle_at_center)
+        
+        # Rotate around center point
+        x_rotated = (smooth_curve_x - x_center) * cos_angle - (smooth_curve_y - y_center) * sin_angle
+        y_rotated = (smooth_curve_x - x_center) * sin_angle + (smooth_curve_y - y_center) * cos_angle
+        
+        smooth_curve_x = x_rotated
+        smooth_curve_y = y_rotated
+        
+        # Also rotate the angles
+        smooth_curve_angle_of_central_p = smooth_curve_angle_of_central_p - angle_at_center
+
+    # Close the lattice if if_sublattice is True
+    if if_sublattice:
+        # Find rightmost and leftmost points
+        rightmost_idx = np.argmax(smooth_curve_x)
+        leftmost_idx = np.argmin(smooth_curve_x)
+        
+        x_right = smooth_curve_x[rightmost_idx]
+        y_right = smooth_curve_y[rightmost_idx]
+        x_left = smooth_curve_x[leftmost_idx]
+        y_left = smooth_curve_y[leftmost_idx]
+        
+        closing_point_x = 0.0
+        closing_point_y = -4.321e5
+        
+        # Number of points for each closing segment
+        n_closing = 100  # Can adjust this for finer resolution
+        
+        # Segment 1: From right to closing point
+        x_seg1 = np.linspace(x_right, closing_point_x, n_closing)
+        y_seg1 = np.linspace(y_right, closing_point_y, n_closing)
+        
+        # Segment 2: From closing point back to left
+        x_seg2 = np.linspace(closing_point_x, x_left, n_closing)
+        y_seg2 = np.linspace(closing_point_y, y_left, n_closing)
+        
+        # Calculate s values for closing segments
+        # Segment 1 distance
+        seg1_dist = np.sqrt((x_seg1[-1] - x_seg1[0])**2 + (y_seg1[-1] - y_seg1[0])**2)
+        s_seg1 = np.linspace(smooth_curve_s[-1], smooth_curve_s[-1] + seg1_dist, n_closing)
+        
+        # Segment 2 distance
+        seg2_dist = np.sqrt((x_seg2[-1] - x_seg2[0])**2 + (y_seg2[-1] - y_seg2[0])**2)
+        s_seg2 = np.linspace(s_seg1[-1], s_seg1[-1] + seg2_dist, n_closing)
+        
+        # Calculate angles for closing segments
+        angle_seg1 = np.arctan2(y_seg1[1:] - y_seg1[:-1], x_seg1[1:] - x_seg1[:-1])
+        angle_seg1 = np.append(angle_seg1, angle_seg1[-1])  # Pad last value
+        
+        angle_seg2 = np.arctan2(y_seg2[1:] - y_seg2[:-1], x_seg2[1:] - x_seg2[:-1])
+        angle_seg2 = np.append(angle_seg2, angle_seg2[-1])  # Pad last value
+        
+        # For beam parameters in closing segments, use values from the nearby endpoints
+        beamsize_x_seg1 = np.full(n_closing, 0)
+        beamsize_x_seg2 = np.full(n_closing, 0)
+        
+        beamsize_y_seg1 = np.full(n_closing, 0)
+        beamsize_y_seg2 = np.full(n_closing, 0)
+        
+        beamdiv_x_seg1 = np.full(n_closing, 0)
+        beamdiv_x_seg2 = np.full(n_closing, 0)
+        
+        beamdiv_y_seg1 = np.full(n_closing, 0)
+        beamdiv_y_seg2 = np.full(n_closing, 0)
+        
+        dispersion_Dx_seg1 = np.full(n_closing, 0)
+        dispersion_Dx_seg2 = np.full(n_closing, 0)
+        
+        dispersion_Dpx_seg1 = np.full(n_closing, 0)
+        dispersion_Dpx_seg2 = np.full(n_closing, 0)
+        
+        # Append closing segments to the smooth curves
+        smooth_curve_x = np.concatenate([smooth_curve_x, x_seg1, x_seg2])
+        smooth_curve_y = np.concatenate([smooth_curve_y, y_seg1, y_seg2])
+        smooth_curve_s = np.concatenate([smooth_curve_s, s_seg1, s_seg2])
+        smooth_curve_angle_of_central_p = np.concatenate([smooth_curve_angle_of_central_p, angle_seg1, angle_seg2])
+        
+        smooth_curve_beamsize_x = np.concatenate([smooth_curve_beamsize_x, beamsize_x_seg1, beamsize_x_seg2])
+        smooth_curve_beamsize_y = np.concatenate([smooth_curve_beamsize_y, beamsize_y_seg1, beamsize_y_seg2])
+        smooth_curve_beamdiv_x = np.concatenate([smooth_curve_beamdiv_x, beamdiv_x_seg1, beamdiv_x_seg2])
+        smooth_curve_beamdiv_y = np.concatenate([smooth_curve_beamdiv_y, beamdiv_y_seg1, beamdiv_y_seg2])
+        smooth_curve_dispersion_Dx = np.concatenate([smooth_curve_dispersion_Dx, dispersion_Dx_seg1, dispersion_Dx_seg2])
+        smooth_curve_dispersion_Dpx = np.concatenate([smooth_curve_dispersion_Dpx, dispersion_Dpx_seg1, dispersion_Dpx_seg2])
+
 
     lattice_dict = {}
     u = np.linspace(0, 1, len(smooth_curve_s))
