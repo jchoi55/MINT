@@ -441,8 +441,12 @@ def create_smoothed_lattice(
     **kwargs,
 ):
     """
-    New-physics smoothed lattice (Twiss->gamma->beam envelopes + optional dispersion+sigma_delta),
-    but returns the OLD interface: interp1d callables in a lattice_dict.
+    Smoothed lattice (Twiss->gamma->beam envelopes + optional dispersion+sigma_delta),
+    returning the legacy interface: interp1d callables in a lattice_dict.
+
+    Key change vs the previous version:
+      *Geometry (x,y,angle_of_central_p) is obtained by integrating through elements* by
+      splitting each element's total bending kick into many tiny sub-kicks.
 
     Returns at least:
       x,y,s,angle_of_central_p,beamsize_x,beamsize_y,beamdiv_x,beamdiv_y,
@@ -468,10 +472,10 @@ def create_smoothed_lattice(
             "Need ALFX/ALFY or GAMMAX/GAMMAY columns to compute divergences (gamma)."
         )
 
-    # ---- Optional geometry columns (x,y,px,py/angle)
+    # ---- Optional geometry columns
     have_xy = (x_col in df.columns) and (y_col in df.columns)
     have_p = (px_col in df.columns) and (py_col in df.columns)
-    have_angle = angle_col in df.columns
+    have_kick = angle_col in df.columns
 
     # Sort by S
     s = np.asarray(df["S"], dtype=float)
@@ -491,7 +495,7 @@ def create_smoothed_lattice(
     if C <= 0:
         raise ValueError("Could not infer positive circumference from TWISS data.")
 
-    # Periodic interpolation knots helper
+    # Periodic interpolation knots helper (for optics fields)
     def periodic_knots(arr: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
         ss = np.mod(s, C)
         idx = np.argsort(ss)
@@ -503,6 +507,11 @@ def create_smoothed_lattice(
 
     # Uniform grid in meters for physics; later convert to cm for output interpolants
     n_elements = int(n_elements)
+    if n_elements <= 10:
+        raise ValueError(
+            "n_elements must be reasonably large (>10) for a smooth lattice."
+        )
+
     s_grid_m = np.linspace(0.0, C, n_elements, endpoint=False)
 
     def interp_on_grid(arr: np.ndarray) -> np.ndarray:
@@ -519,7 +528,6 @@ def create_smoothed_lattice(
         gamx = (1.0 + alfx**2) / betx
         gamy = (1.0 + alfy**2) / bety
     else:
-        # fallback to provided gammas
         alfx = None
         alfy = None
         gamx = interp_on_grid(df["GAMMAX"].to_numpy(dtype=float))
@@ -553,7 +561,7 @@ def create_smoothed_lattice(
         Dx = np.zeros_like(s_grid_m)
         Dpx = np.zeros_like(s_grid_m)
 
-    # ---- Beam envelopes (NEW PHYSICS semantics from your create_smoothed_lattice)
+    # ---- Beam envelopes
     eps = float(emittance_RMS)
     sigx = np.sqrt(np.maximum(0.0, eps * betx))
     sigxp = np.sqrt(np.maximum(0.0, eps * gamx))
@@ -576,75 +584,164 @@ def create_smoothed_lattice(
     else:
         sigx_tot, sigxp_tot = sigx, sigxp
 
-    # ---- Geometry (x,y, angle_of_central_p)
-    # If your df already contains x,y and either angle or px,py, we interpolate those.
-    # If not present, we still return callables, but they will be zero (so downstream doesn’t crash).
-    if have_xy:
-        x_m = interp_on_grid(df[x_col].to_numpy(dtype=float))
-        y_m = interp_on_grid(df[y_col].to_numpy(dtype=float))
-    else:
-        x_m = np.zeros_like(s_grid_m)
-        y_m = np.zeros_like(s_grid_m)
+    # ---- Geometry via element subdivision integration
+    # This is the key change: we do NOT linearly interpolate sparse (x,y) points.
 
-    if have_angle:
-        angle = interp_on_grid(df[angle_col].to_numpy(dtype=float))
-    elif have_p:
-        px = interp_on_grid(df[px_col].to_numpy(dtype=float))
-        py = interp_on_grid(df[py_col].to_numpy(dtype=float))
-        angle = np.arctan2(py, px)
-    else:
-        angle = np.zeros_like(s_grid_m)
+    def _integrate_geometry() -> tuple[np.ndarray, np.ndarray, np.ndarray] | None:
+        """Integrate x(s), y(s), theta(s) by splitting each element's total kick into sub-kicks.
 
-    # Rotation/closing: keep flags but don’t invent geometry unless you explicitly do that elsewhere.
-    # (If you want the earlier geometric rotate/close behavior, we can merge it in cleanly.)
-    # if rotated:
-    #     # Rotate around middle of the ring in the sampled arrays
-    #     mid = len(s_grid_m) // 2
-    #     x0, y0 = x_m[mid], y_m[mid]
-    #     a0 = angle[mid]
-    #     ca, sa = np.cos(-a0), np.sin(-a0)
-    #     xr = (x_m - x0) * ca - (y_m - y0) * sa
-    #     yr = (x_m - x0) * sa + (y_m - y0) * ca
-    #     x_m, y_m = xr, yr
-    #     angle = angle - a0
+        Requires x,y and ANGLE (kick). Initial direction comes from px,py if present; otherwise
+        it is estimated from the first two geometry points.
+        """
+
+        if not (have_xy and have_kick):
+            return None
+
+        # Initial position
+        x0 = float(df.iloc[0][x_col])
+        y0 = float(df.iloc[0][y_col])
+
+        # Initial direction (unit vector)
+        if have_p:
+            px0 = float(df.iloc[0][px_col])
+            py0 = float(df.iloc[0][py_col])
+            pnorm = float(np.hypot(px0, py0))
+            if np.isfinite(pnorm) and pnorm > 0.0:
+                px0, py0 = px0 / pnorm, py0 / pnorm
+            else:
+                px0, py0 = 1.0, 0.0
+        else:
+            # estimate from next available geometry point
+            if len(df) > 1:
+                dx0 = float(df.iloc[1][x_col]) - x0
+                dy0 = float(df.iloc[1][y_col]) - y0
+                th0 = float(np.arctan2(dy0, dx0))
+            else:
+                th0 = 0.0
+            px0, py0 = float(np.cos(th0)), float(np.sin(th0))
+
+        # Target step size (meters)
+        ds_target = C / n_elements
+
+        xs = [x0]
+        ys = [y0]
+        ss = [0.0]
+        ths = [float(np.arctan2(py0, px0))]
+
+        x, y, px, py = x0, y0, px0, py0
+        s_acc = 0.0
+
+        for i in range(len(df)):
+            ell = float(df.iloc[i]["L"])
+            if (not np.isfinite(ell)) or ell <= 0.0:
+                continue
+
+            dtheta = float(df.iloc[i][angle_col])
+            if not np.isfinite(dtheta):
+                dtheta = 0.0
+
+            n_sub = int(np.ceil(ell / max(ds_target, 1e-12)))
+            n_sub = max(n_sub, 1)
+            ds_sub = ell / n_sub
+            dth_sub = dtheta / n_sub
+
+            for _ in range(n_sub):
+                x, y, px, py = advance_in_pos_and_momentum(
+                    x, y, px, py, dth_sub, ds_sub
+                )
+                s_acc += ds_sub
+                xs.append(x)
+                ys.append(y)
+                ss.append(s_acc)
+                ths.append(float(np.arctan2(py, px)))
+
+        xs = np.asarray(xs, dtype=float)
+        ys = np.asarray(ys, dtype=float)
+        ss = np.asarray(ss, dtype=float)
+        ths = np.asarray(ths, dtype=float)
+
+        if len(ss) < 2 or ss[-1] <= 0.0:
+            return None
+
+        # Small mismatch between sum(L) and inferred C can happen; normalize to C.
+        ss *= C / ss[-1]
+
+        # Periodic endpoint to allow interpolation at/near C.
+        # We force closure by repeating the first point at s=C.
+        xs = np.concatenate([xs, xs[:1]])
+        ys = np.concatenate([ys, ys[:1]])
+        ss = np.concatenate([ss, np.array([C])])
+
+        # Unwrap theta to avoid jumps during interpolation
+        th_unw = np.unwrap(ths)
+        # Append a consistent endpoint for theta; the value at C should match 0-turn closure
+        th_unw = np.concatenate([th_unw, th_unw[:1] + (th_unw[-1] - th_unw[0])])
+
+        x_m = np.interp(s_grid_m, ss, xs)
+        y_m = np.interp(s_grid_m, ss, ys)
+        theta_m = np.interp(s_grid_m, ss, th_unw)
+
+        # Wrap back to [-pi, pi)
+        theta_m = (theta_m + np.pi) % (2.0 * np.pi) - np.pi
+
+        return x_m, y_m, theta_m
+
+    geom = _integrate_geometry()
+
+    if geom is None:
+        # Fallback: interpolate sparse geometry if we cannot integrate
+        if have_xy:
+            x_m = interp_on_grid(df[x_col].to_numpy(dtype=float))
+            y_m = interp_on_grid(df[y_col].to_numpy(dtype=float))
+        else:
+            x_m = np.zeros_like(s_grid_m)
+            y_m = np.zeros_like(s_grid_m)
+
+        if have_p:
+            px = interp_on_grid(df[px_col].to_numpy(dtype=float))
+            py = interp_on_grid(df[py_col].to_numpy(dtype=float))
+            angle = np.arctan2(py, px)
+        else:
+            # last resort: tangent from geometry
+            dxf = np.gradient(x_m, s_grid_m)
+            dyf = np.gradient(y_m, s_grid_m)
+            angle = np.arctan2(dyf, dxf)
+    else:
+        x_m, y_m, angle = geom
+
+    # Rotation/centering if requested
     if rotated:
-        # Rotate around middle of the ring in the sampled arrays
         mid = len(s_grid_m) // 2
         x0, y0 = x_m[mid], y_m[mid]
 
-        # --- compute the local trajectory direction from geometry (robust)
-        # use a window around the midpoint to estimate tangent
-        k = 200  # points; tune 50-500 depending on your grid density
+        # Use a wider window for robust tangent estimation
+        k = 500
         i0 = max(0, mid - k)
         i1 = min(len(x_m) - 1, mid + k)
 
         dx = x_m[i1] - x_m[i0]
         dy = y_m[i1] - y_m[i0]
-        theta_tan = np.arctan2(dy, dx)  # direction of trajectory near the center
+        theta_tan = float(np.arctan2(dy, dx))
 
-        # Rotate by -theta_tan around (x0,y0)
         ca, sa = np.cos(-theta_tan), np.sin(-theta_tan)
         xr = (x_m - x0) * ca - (y_m - y0) * sa
         yr = (x_m - x0) * sa + (y_m - y0) * ca
         x_m, y_m = xr, yr
 
-        # If you still want an "angle_of_central_p" returned, make it consistent:
-        # Option 1 (recommended): define it as the geometric tangent angle everywhere
-        # (so it's guaranteed consistent with x,y)
-        dxf = np.gradient(x_m, s_grid_m)
-        dyf = np.gradient(y_m, s_grid_m)
-        angle = np.arctan2(dyf, dxf)
+        # Keep angle consistent with rotated geometry
+        angle = angle - theta_tan
+        angle = (angle + np.pi) % (2.0 * np.pi) - np.pi
 
         # Optional: force the direction at the center to point along +x (not -x)
-        if np.mean(np.diff(x_m[mid - 200 : mid + 200])) < 0:
+        if np.mean(np.diff(x_m[mid - 500 : mid + 500])) < 0:
             x_m *= -1
             angle = np.arctan2(np.gradient(y_m, s_grid_m), np.gradient(x_m, s_grid_m))
 
-    # if_sublattice: the “close by straight lines” logic is geometry-specific.
-    # If you still need that, say so and I’ll splice the earlier closure logic into this version
-    # while keeping all optics periodic. For now: we keep the physics outputs and interface.
+    # NOTE: if_sublattice closure is geometry-specific and is not implemented here.
+    # Keep the flag for interface compatibility.
+    _ = if_sublattice
 
-    # ---- Convert to OLD units convention
+    # ---- Convert to legacy units convention
     s_cm = s_grid_m * const.m_to_cm
     x_cm = x_m * const.m_to_cm
     y_cm = y_m * const.m_to_cm
@@ -652,14 +749,12 @@ def create_smoothed_lattice(
     beamsize_x_cm = sigx_tot * const.m_to_cm
     beamsize_y_cm = sigy * const.m_to_cm
 
-    # IMPORTANT: beamdiv in your old interface was an angle in rad.
-    # Your new-physics version uses sigma_x' directly (dimensionless ~ rad for small angles).
-    # If you want the "angle" version, keep arctan. For small angles, arctan(sigma) ~ sigma.
+    # beamdiv in the old interface is an angle in rad.
     beamdiv_x = np.arctan(sigxp_tot)
     beamdiv_y = np.arctan(sigyp)
 
-    # ---- Build interpolation objects exactly as before
-    lattice_dict = {}
+    # ---- Build interpolation objects
+    lattice_dict: dict[str, object] = {}
     u = np.linspace(0.0, 1.0, len(s_cm))
 
     lattice_dict["x"] = interp1d(u, x_cm, bounds_error=False, fill_value=None)
@@ -691,20 +786,19 @@ def create_smoothed_lattice(
 
     lattice_dict["inv_s"] = interp1d(s_cm, u, bounds_error=False, fill_value=None)
 
-    # ---- Beam momentum (same definition as you asked)
+    # ---- Beam momentum
     lattice_dict["beam_p0"] = np.sqrt(float(df.attrs["ENERGY"]) ** 2 - const.m_mu**2)
 
-    # ---- Extras I strongly recommend for MC beam sampling (also interpolants)
-    # Twiss / gamma
+    # ---- Extras for MC beam sampling (also interpolants)
     lattice_dict["betx"] = interp1d(u, betx, bounds_error=False, fill_value=None)
     lattice_dict["bety"] = interp1d(u, bety, bounds_error=False, fill_value=None)
     lattice_dict["gamx"] = interp1d(u, gamx, bounds_error=False, fill_value=None)
     lattice_dict["gamy"] = interp1d(u, gamy, bounds_error=False, fill_value=None)
+
     if have_alpha:
         lattice_dict["alfx"] = interp1d(u, alfx, bounds_error=False, fill_value=None)
         lattice_dict["alfy"] = interp1d(u, alfy, bounds_error=False, fill_value=None)
 
-    # Covariances (for correlated Gaussian sampling in (x,x') and (y,y'))
     lattice_dict["cov_x_xp"] = interp1d(
         u, cov_x_xp, bounds_error=False, fill_value=None
     )
@@ -712,13 +806,11 @@ def create_smoothed_lattice(
         u, cov_y_yp, bounds_error=False, fill_value=None
     )
 
-    # If you want the *raw* sigma_x' (not arctan), expose it too:
     lattice_dict["sigma_xp"] = interp1d(
         u, sigxp_tot, bounds_error=False, fill_value=None
     )
     lattice_dict["sigma_yp"] = interp1d(u, sigyp, bounds_error=False, fill_value=None)
 
-    # Helpful meta for sampling
     lattice_dict["length_cm"] = float(C * const.m_to_cm)
     lattice_dict["length_m"] = float(C)
     lattice_dict["emittance_RMS"] = float(eps)
@@ -726,7 +818,6 @@ def create_smoothed_lattice(
     lattice_dict["include_dispersion"] = bool(include_dispersion)
     lattice_dict["sigma_delta"] = None if sigma_delta is None else float(sigma_delta)
 
-    # Optional phases if you ever need them
     if mux is not None:
         lattice_dict["mux"] = interp1d(u, mux, bounds_error=False, fill_value=None)
     if muy is not None:
