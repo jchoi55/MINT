@@ -1,10 +1,9 @@
 # Muon Induced Neutrino Tool (MINT)
 
-![MINT logo](assets/mint-logo.svg)
+<img src="assets/mint-logo.svg" alt="MINT logo" width="120" />
 
 Generating neutrino fluxes at muon facilities, including neutrino factories and muon colliders.
 
-Repository: https://github.com/jchoi55/MINT
 
 ## Installation
 
