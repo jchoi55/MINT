@@ -3,6 +3,13 @@ venv/
 localtest*
 .venv/
 
+.DS_Store
+
 # Ignore Python bytecode files
 __pycache__/
 *.pyc
+
+# Packaging/build artifacts
+build/
+dist/
+*.egg-info/
