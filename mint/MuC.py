@@ -69,9 +69,13 @@ class MuDecaySimulator:
             self.remove_ring_fraction = [0, 0]
 
         self.nuflavor = nuflavor
-        self.muon_charge = (
-            -1 if (self.nuflavor == "numu" or self.nuflavor == "nuebar") else +1
-        )
+        if (self.nuflavor == "numu" or self.nuflavor == "nuebar"):
+            self.muon_charge = -1
+        elif (self.nuflavor == "nue" or self.nuflavor == "numubar"):
+            self.muon_charge = +1
+        else: #default antimuons
+            self.muon_charge = +1
+        
         self.muon_polarization = muon_polarization
         self.NLO = NLO
         self.mudecay_model = mudecay_model
