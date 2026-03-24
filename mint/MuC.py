@@ -69,13 +69,13 @@ class MuDecaySimulator:
             self.remove_ring_fraction = [0, 0]
 
         self.nuflavor = nuflavor
-        if (self.nuflavor == "numu" or self.nuflavor == "nuebar"):
+        if self.nuflavor == "numu" or self.nuflavor == "nuebar":
             self.muon_charge = -1
-        elif (self.nuflavor == "nue" or self.nuflavor == "numubar"):
+        elif self.nuflavor == "nue" or self.nuflavor == "numubar":
             self.muon_charge = +1
-        else: #default antimuons
+        else:  # default antimuons
             self.muon_charge = +1
-        
+
         self.muon_polarization = muon_polarization
         self.NLO = NLO
         self.mudecay_model = mudecay_model
@@ -530,35 +530,51 @@ class MuDecaySimulator:
             self.pnu = self.pnu.rotateX(np.pi)
             self.pmu = self.pmu.rotateX(np.pi)
 
-        print("sample_size:", self.sample_size)
-        print(
-            "pos x range:",
-            np.min(self.pos["x"]),
-            np.mean(self.pos["x"]),
-            np.max(self.pos["x"]),
-        )
-        print(
-            "pos y range:",
-            np.min(self.pos["y"]),
-            np.mean(self.pos["y"]),
-            np.max(self.pos["y"]),
-        )
-        print(
-            "pos z range:",
-            np.min(self.pos["z"]),
-            np.mean(self.pos["z"]),
-            np.max(self.pos["z"]),
-        )
-        print("s_in_turn min/max:", np.min(self.s_in_turn), np.max(self.s_in_turn))
-        print("u_parameter min/max:", np.min(u_parameter), np.max(u_parameter))
-        print("mutimes min/max:", np.min(self.mutimes), np.max(self.mutimes))
-        print(
-            "muon_lifetime min/max:",
-            np.min(self.muon_lifetime),
-            np.max(self.muon_lifetime),
-        )
+        # print("sample_size:", self.sample_size)
+        # print(
+        #     "pos x range:",
+        #     np.min(self.pos["x"]),
+        #     np.mean(self.pos["x"]),
+        #     np.max(self.pos["x"]),
+        # )
+        # print(
+        #     "pos y range:",
+        #     np.min(self.pos["y"]),
+        #     np.mean(self.pos["y"]),
+        #     np.max(self.pos["y"]),
+        # )
+        # print(
+        #     "pos z range:",
+        #     np.min(self.pos["z"]),
+        #     np.mean(self.pos["z"]),
+        #     np.max(self.pos["z"]),
+        # )
+        # print("s_in_turn min/max:", np.min(self.s_in_turn), np.max(self.s_in_turn))
+        # print("u_parameter min/max:", np.min(u_parameter), np.max(u_parameter))
+        # print("mutimes min/max:", np.min(self.mutimes), np.max(self.mutimes))
+        # print(
+        #     "muon_lifetime min/max:",
+        #     np.min(self.muon_lifetime),
+        #     np.max(self.muon_lifetime),
+        # )
 
         return self
+
+    def get_transverse_(self, det_location=[0, 0, 1e5]):
+
+        det_vector = vector.array(
+            {"x": det_location[0], "y": det_location[1], "z": det_location[2]}
+        )
+
+        # normal_to_detector_plane = det_vector.unit()
+        distances = det_vector - self.pos
+        neutrino_direction = self.pnu.to_3D().unit()
+
+        # Project distance vector onto neutrino direction
+        sintheta = np.sqrt(1 - distances.unit().dot(neutrino_direction) ** 2)
+
+        # Position of closest approach on the neutrino path
+        radial_distance = sintheta * distances.mag
 
     def get_flux_at_generic_location(
         self,
