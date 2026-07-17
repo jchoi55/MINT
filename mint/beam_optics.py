@@ -362,14 +362,32 @@ def create_smoothed_lattice_truncated(
             [smooth_curve_dispersion_Dpx, dispersion_Dpx_seg1, dispersion_Dpx_seg2]
         )
 
+    # Map drawing-plane geometry to WORLD coordinates (see create_smoothed_lattice):
+    #   z (tangential) = smooth_curve_x, x (toward center) = s * smooth_curve_y, y = 0.
+    s_transverse = 1.0 if float(np.mean(smooth_curve_y)) >= 0.0 else -1.0
+    z_world = smooth_curve_x
+    x_world = s_transverse * smooth_curve_y
+    y_world = np.zeros_like(z_world)
+    tx_world = s_transverse * np.sin(smooth_curve_angle_of_central_p)
+    ty_world = np.zeros_like(smooth_curve_angle_of_central_p)
+    tz_world = np.cos(smooth_curve_angle_of_central_p)
+    angle_world = np.arctan2(tx_world, tz_world)
+
     lattice_dict = {}
     u = np.linspace(0, 1, len(smooth_curve_s))
-    lattice_dict["x"] = interp1d(u, smooth_curve_x, bounds_error=False, fill_value=None)
-    lattice_dict["y"] = interp1d(u, smooth_curve_y, bounds_error=False, fill_value=None)
+    lattice_dict["x"] = interp1d(u, x_world, bounds_error=False, fill_value=None)
+    lattice_dict["y"] = interp1d(u, y_world, bounds_error=False, fill_value=None)
+    lattice_dict["z"] = interp1d(u, z_world, bounds_error=False, fill_value=None)
     lattice_dict["s"] = interp1d(u, smooth_curve_s, bounds_error=False, fill_value=None)
 
     lattice_dict["angle_of_central_p"] = interp1d(
-        u, smooth_curve_angle_of_central_p, bounds_error=False, fill_value=None
+        u, angle_world, bounds_error=False, fill_value=None
+    )
+    _tx_i = interp1d(u, tx_world, bounds_error=False, fill_value=None)
+    _ty_i = interp1d(u, ty_world, bounds_error=False, fill_value=None)
+    _tz_i = interp1d(u, tz_world, bounds_error=False, fill_value=None)
+    lattice_dict["tangent"] = lambda uu, _tx_i=_tx_i, _ty_i=_ty_i, _tz_i=_tz_i: np.vstack(
+        [_tx_i(uu), _ty_i(uu), _tz_i(uu)]
     )
     lattice_dict["beamsize_x"] = interp1d(
         u, smooth_curve_beamsize_x, bounds_error=False, fill_value=None
@@ -519,19 +537,70 @@ def create_smoothed_lattice(
         return np.interp(s_grid_m, ss_ext, xx_ext)
 
     # ---- Optics fields
-    betx = interp_on_grid(df["BETX"].to_numpy(dtype=float))
-    bety = interp_on_grid(df["BETY"].to_numpy(dtype=float))
-
+    #
+    # Interpolating the raw Twiss functions between sparse points is delicate near a
+    # low-beta IP, where beta is parabolic, beta(s) = beta* + s^2/beta*, and plunges
+    # by orders of magnitude between two tabulated points:
+    #   * gamma is the phase-space INVARIANT -- constant in a field-free drift -- so it
+    #     interpolates safely and is what we use for the DIVERGENCE, sqrt(eps*gamma).
+    #     (Deriving gamma = (1+alpha^2)/beta from a linearly interpolated beta instead
+    #     makes the divergence ~8x too low at the IP.)
+    #   * beta (the BEAM SIZE) must respect its local parabola. We model beta inside
+    #     each Twiss segment by its exact local form beta(d) = beta0 - 2 alpha0 d +
+    #     gamma0 d^2 (minimum 1/gamma0 > 0, so always POSITIVE), and blend the left and
+    #     right segment parabolas. This is exact in drifts, matches the Twiss table at
+    #     every point, and -- unlike reconstructing beta = (1+alpha^2)/gamma from
+    #     independently interpolated alpha, gamma -- does not produce spurious dips at
+    #     alpha zero-crossings in the arcs.
     if have_alpha:
+        # alpha interpolates cleanly (linear in drifts, smooth in arcs); used for the
+        # x-x' covariance and for the beta segment-parabola blend.
         alfx = interp_on_grid(df["ALFX"].to_numpy(dtype=float))
         alfy = interp_on_grid(df["ALFY"].to_numpy(dtype=float))
-        gamx = (1.0 + alfx**2) / betx
-        gamy = (1.0 + alfy**2) / bety
     else:
         alfx = None
         alfy = None
+
+    if have_gamma:
         gamx = interp_on_grid(df["GAMMAX"].to_numpy(dtype=float))
         gamy = interp_on_grid(df["GAMMAY"].to_numpy(dtype=float))
+    else:
+        # No gamma column: derive it (interpolating beta is imperfect in low-beta
+        # drifts, but it is the best available without the invariant gamma).
+        gamx = (1.0 + alfx**2) / interp_on_grid(df["BETX"].to_numpy(dtype=float))
+        gamy = (1.0 + alfy**2) / interp_on_grid(df["BETY"].to_numpy(dtype=float))
+
+    def beta_twiss_on_grid(beta_col: str, alpha_col: str) -> np.ndarray:
+        """Interpolate beta(s) onto s_grid_m using the local Twiss parabola in each
+        segment: beta(d) = beta0 - 2 alpha0 d + gamma0 d^2. Positive by construction,
+        exact in drifts, and dip-free at alpha zero-crossings."""
+        bt = df[beta_col].to_numpy(dtype=float)
+        at = df[alpha_col].to_numpy(dtype=float)
+        ss = np.mod(s, C)
+        order = np.argsort(ss)
+        ss, bt, at = ss[order], bt[order], at[order]
+        keep = np.concatenate([[True], np.diff(ss) > 0])  # drop duplicate s
+        ss, bt, at = ss[keep], bt[keep], at[keep]
+        gt = (1.0 + at**2) / bt
+        # periodic wrap so grid points near 0 and C are bracketed
+        ss_ext = np.concatenate([[ss[-1] - C], ss, [ss[0] + C]])
+        bt_ext = np.concatenate([[bt[-1]], bt, [bt[0]]])
+        at_ext = np.concatenate([[at[-1]], at, [at[0]]])
+        gt_ext = np.concatenate([[gt[-1]], gt, [gt[0]]])
+        j = np.clip(np.searchsorted(ss_ext, s_grid_m) - 1, 0, len(ss_ext) - 2)
+        sL, sR = ss_ext[j], ss_ext[j + 1]
+        dL, dR = s_grid_m - sL, s_grid_m - sR
+        beta_L = bt_ext[j] - 2.0 * at_ext[j] * dL + gt_ext[j] * dL**2
+        beta_R = bt_ext[j + 1] - 2.0 * at_ext[j + 1] * dR + gt_ext[j + 1] * dR**2
+        t = (s_grid_m - sL) / (sR - sL)
+        return (1.0 - t) * beta_L + t * beta_R
+
+    if have_alpha:
+        betx = beta_twiss_on_grid("BETX", "ALFX")
+        bety = beta_twiss_on_grid("BETY", "ALFY")
+    else:
+        betx = interp_on_grid(df["BETX"].to_numpy(dtype=float))
+        bety = interp_on_grid(df["BETY"].to_numpy(dtype=float))
 
     # Optional phase advances (not required, but useful sometimes)
     mux = (
@@ -741,10 +810,27 @@ def create_smoothed_lattice(
     # Keep the flag for interface compatibility.
     _ = if_sublattice
 
-    # ---- Convert to legacy units convention
+    # ---- Map the integrated (drawing-plane) geometry to WORLD coordinates.
+    # The MAD-X survey geometry lives in a horizontal plane: x_m is the
+    # longitudinal coordinate (along the beam) and y_m the transverse one, with
+    # `angle` the tangent angle measured from x_m toward y_m. In world axes:
+    #   z (tangential) = x_m,  x (toward center) = s_transverse * y_m,  y (up) = 0.
+    # Choose the transverse sign so the ring bulges toward +x (center at +x).
+    s_transverse = 1.0 if float(np.mean(y_m)) >= 0.0 else -1.0
+
+    z_world_m = x_m
+    x_world_m = s_transverse * y_m
+    # World tangent components (unit): tz = cos(angle), tx = s * sin(angle), ty = 0.
+    tx_world = s_transverse * np.sin(angle)
+    ty_world = np.zeros_like(angle)
+    tz_world = np.cos(angle)
+    # World tangent angle in the horizontal z-x plane, from +z toward +x.
+    angle_world = np.arctan2(tx_world, tz_world)
+
     s_cm = s_grid_m * const.m_to_cm
-    x_cm = x_m * const.m_to_cm
-    y_cm = y_m * const.m_to_cm
+    x_cm = x_world_m * const.m_to_cm
+    y_cm = np.zeros_like(x_cm)
+    z_cm = z_world_m * const.m_to_cm
 
     beamsize_x_cm = sigx_tot * const.m_to_cm
     beamsize_y_cm = sigy * const.m_to_cm
@@ -759,10 +845,19 @@ def create_smoothed_lattice(
 
     lattice_dict["x"] = interp1d(u, x_cm, bounds_error=False, fill_value=None)
     lattice_dict["y"] = interp1d(u, y_cm, bounds_error=False, fill_value=None)
+    lattice_dict["z"] = interp1d(u, z_cm, bounds_error=False, fill_value=None)
     lattice_dict["s"] = interp1d(u, s_cm, bounds_error=False, fill_value=None)
 
     lattice_dict["angle_of_central_p"] = interp1d(
-        u, angle, bounds_error=False, fill_value=None
+        u, angle_world, bounds_error=False, fill_value=None
+    )
+
+    # World unit tangent [tx, ty, tz] of the central orbit.
+    _tx_i = interp1d(u, tx_world, bounds_error=False, fill_value=None)
+    _ty_i = interp1d(u, ty_world, bounds_error=False, fill_value=None)
+    _tz_i = interp1d(u, tz_world, bounds_error=False, fill_value=None)
+    lattice_dict["tangent"] = lambda uu, _tx_i=_tx_i, _ty_i=_ty_i, _tz_i=_tz_i: np.vstack(
+        [_tx_i(uu), _ty_i(uu), _tz_i(uu)]
     )
 
     lattice_dict["beamsize_x"] = interp1d(

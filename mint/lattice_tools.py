@@ -16,6 +16,12 @@ class Lattice:
 
         lattice_dict = kwargs.copy()
 
+        # World-coordinate convention (both lab frame and beam-comoving frame):
+        #   x -> toward the center of the ring (+x points to the center)
+        #   y -> up, out of the ring plane (0 for a planar ring)
+        #   z -> tangential, along the beam direction of travel
+        # lattice.x/y/z return world coordinates directly, and lattice.tangent(u)
+        # returns the world-frame unit tangent [tx, ty, tz] of the central orbit.
         for key in [
             "beam_p0",
             "x",
@@ -28,6 +34,27 @@ class Lattice:
                 setattr(self, key, lattice_dict.pop(key))
             else:
                 raise ValueError(f"Lattice dictionary must contain {key} key.")
+
+        # World longitudinal coordinate z (tangential). Defaults to 0 (planar ring
+        # drawn purely in the horizontal x-z plane) if a producer does not supply it.
+        if "z" in lattice_dict:
+            self.z = lattice_dict.pop("z")
+        else:
+            self.z = lambda u: np.zeros_like(np.asarray(u, dtype=float))
+
+        # World unit tangent [tx, ty, tz] of the central orbit. If not supplied,
+        # derive it from angle_of_central_p, the tangent angle measured in the
+        # horizontal z-x plane from +z toward +x: t = (sin a, 0, cos a).
+        if "tangent" in lattice_dict:
+            self.tangent = lattice_dict.pop("tangent")
+        else:
+            self.tangent = lambda uu: np.vstack(
+                [
+                    np.sin(self.angle_of_central_p(uu)),
+                    np.zeros_like(np.asarray(uu, dtype=float)),
+                    np.cos(self.angle_of_central_p(uu)),
+                ]
+            )
 
         # Transverse beam divergence
         if "beamdiv_x" in lattice_dict and "beamdiv_y" in lattice_dict:
@@ -157,20 +184,29 @@ def create_racetrack_lattice(
     x_bottom = np.linspace(straight_length / 2, -straight_length / 2, n_points)
     y_bottom = np.full_like(x_bottom, -racetrack_radius)
 
-    # Concatenate all segments
-    x_racetrack = np.concatenate([x_left, x_top, x_right, x_bottom])
-    y_racetrack = np.concatenate([y_left, y_top, y_right, y_bottom])
-    y_racetrack -= np.max(y_racetrack)
+    # Concatenate all segments. The curve is built in a 2D plane where the first
+    # array is longitudinal (along the straights) and the second is transverse.
+    longitudinal = np.concatenate([x_left, x_top, x_right, x_bottom])
+    transverse = np.concatenate([y_left, y_top, y_right, y_bottom])
+    # Shift so the top straight (the IP straight) sits at transverse = 0; the ring
+    # then extends toward negative transverse.
+    transverse -= np.max(transverse)
+
+    # Map to WORLD coordinates: z = longitudinal (tangential), x = toward the ring
+    # center (+x points to the center, so flip the transverse sign), y = 0 (planar).
+    z_world = longitudinal
+    x_world = -transverse
+    y_world = np.zeros_like(longitudinal)
 
     lattice_dict = create_lattice_dict_from_vertices(
-        (x_racetrack, y_racetrack), n_elements=n_elements
+        (x_world, y_world, z_world), n_elements=n_elements
     )
     # Any additional user-input
     lattice_dict.update(kwargs)
 
-    # the x-coordinates are the vertical component of the racetrack, and the z-coordinates are the horizontal component of the racetrack
     lattice = Lattice(**lattice_dict)
-    lattice.vertices = (x_racetrack, y_racetrack, np.full_like(x_racetrack, 0))
+    # vertices in world (x, y, z) order
+    lattice.vertices = (x_world, y_world, z_world)
 
     return lattice
 
@@ -181,13 +217,18 @@ def create_straight_lattice(
 
     n_points = 300
 
-    # Straight
+    # Straight section: longitudinal runs along the beam; transverse = 0.
     u_vals = np.linspace(0, 1, n_points)
-    x_track = u_vals * total_length - total_length / 2
-    y_track = np.full_like(x_track, 0)
+    longitudinal = u_vals * total_length - total_length / 2
+
+    # WORLD coordinates: z = longitudinal (tangential), x = transverse (0 here),
+    # y = 0 (planar).
+    z_world = longitudinal
+    x_world = np.zeros_like(longitudinal)
+    y_world = np.zeros_like(longitudinal)
 
     lattice_dict = create_lattice_dict_from_vertices(
-        (x_track, y_track), n_elements=n_elements
+        (x_world, y_world, z_world), n_elements=n_elements
     )
     # Any additional user-input
     kwargs["beam_p0"] = interp1d(
@@ -203,11 +244,8 @@ def create_straight_lattice(
     lattice_dict.update(kwargs)
 
     lattice = Lattice(**lattice_dict)
-    # vertices format: (x_points, y_points, z_points)
-    # set x_points to the longitudinal coordinate (previously x_track),
-    # y_points to the horizontal coordinate (previously y_track),
-    # z_points to vertical (zeros for straight lattice)
-    lattice.vertices = (x_track, y_track, np.full_like(x_track, 0))
+    # vertices in world (x, y, z) order
+    lattice.vertices = (x_world, y_world, z_world)
 
     return lattice
 
@@ -580,8 +618,14 @@ def create_RLA_lattice(
         kwargs["beamsize_y"] = kwargs["beamsize_x"]
         kwargs["beamdiv_y"] = kwargs["beamdiv_x"]
 
+    # Map to WORLD coordinates: z = longitudinal (x_RLA, along the straights),
+    # x = transverse (y_RLA, the drop/arc excursions), y = 0 (planar RLA).
+    z_world = x_RLA
+    x_world = y_RLA
+    y_world = np.zeros_like(x_RLA)
+
     lattice_dict = create_lattice_dict_from_vertices(
-        (x_RLA, y_RLA), n_elements=n_elements
+        (x_world, y_world, z_world), n_elements=n_elements
     )
 
     kwargs["beam_p0"] = interp1d(
@@ -598,7 +642,8 @@ def create_RLA_lattice(
     lattice_dict.update(kwargs)
 
     lattice = Lattice(**lattice_dict)
-    lattice.vertices = (x_RLA, y_RLA, np.full_like(x_RLA, 0))
+    # vertices in world (x, y, z) order
+    lattice.vertices = (x_world, y_world, z_world)
 
     fig, ax = pt.std_fig(figsize=(4, 3))
     ax.scatter(s, beta, s=1, color="blue")
@@ -626,55 +671,49 @@ def append_lattices(
 ):
     # Append lattices so they go from one after another in space and time
 
-    # Extract vertex arrays (support 2D or 3D vertex tuples)
-    xvals = lattice1.vertices[0]
-    yvals = lattice1.vertices[1]
-    zvals = lattice1.vertices[2] if len(lattice1.vertices) > 2 else np.zeros_like(xvals)
+    # Extract vertex arrays in WORLD (x, y, z) order:
+    #   xw -> transverse (toward center), yw -> vertical (up), zw -> longitudinal.
+    xw = lattice1.vertices[0]
+    yw = lattice1.vertices[1]
+    zw = lattice1.vertices[2] if len(lattice1.vertices) > 2 else np.zeros_like(xw)
 
-    xvals2 = lattice2.vertices[0]
-    yvals2 = lattice2.vertices[1]
-    zvals2 = (
-        lattice2.vertices[2] if len(lattice2.vertices) > 2 else np.zeros_like(xvals2)
-    )
+    xw2 = lattice2.vertices[0]
+    yw2 = lattice2.vertices[1]
+    zw2 = lattice2.vertices[2] if len(lattice2.vertices) > 2 else np.zeros_like(xw2)
 
-    ds_length1 = get_s_element(xvals, yvals)
+    ds_length1 = get_s_element(xw, yw, zw)
     s1 = np.concatenate([[0], np.cumsum(ds_length1)])
     u1 = s1 / s1[-1]
 
-    ds_length2 = get_s_element(xvals2, yvals2)
+    ds_length2 = get_s_element(xw2, yw2, zw2)
     s2 = np.concatenate([[0], np.cumsum(ds_length2)])
     u2 = s2 / s2[-1]
 
-    # Shift second lattice so it follows the first in space.
-    # Note: xvals are longitudinal (maps to world z), yvals horizontal (world x), zvals vertical (world y).
-    xRLAshifted = xvals2 + xvals[-1] + hor_shift
-    yRLAshifted = yvals2 + yvals[-1]
-    zRLAshifted = zvals2 + zvals[-1] + vert_shift
+    # Shift second lattice so it follows the first in space. The lattices are
+    # chained along the longitudinal (world z) direction; hor_shift adds an extra
+    # longitudinal gap and vert_shift an extra vertical (world y) offset.
+    xw2_shifted = xw2 + xw[-1]
+    yw2_shifted = yw2 + yw[-1] + vert_shift
+    zw2_shifted = zw2 + zw[-1] + hor_shift
 
-    # Create a single diagonal transition directly between the lattices
-    # Note: in our coordinate system:
-    # - x is longitudinal (maps to world z)
-    # - y is horizontal (maps to world x)
-    # - z is vertical (maps to world y)
+    # Create a single straight transition connecting the end of lattice1 to the
+    # start of the shifted lattice2, interpolated in all three world coordinates.
     Ntrans = 10_000
+    trans_x = np.linspace(xw[-1], xw2_shifted[0], Ntrans)
+    trans_y = np.linspace(yw[-1], yw2_shifted[0], Ntrans)
+    trans_z = np.linspace(zw[-1], zw2_shifted[0], Ntrans)
 
-    # Create a single diagonal transition that connects the end of first lattice
-    # to the start of second lattice
-    transitionx = np.linspace(xvals[-1], xRLAshifted[0], Ntrans)
-    transitiony_hor = np.linspace(yvals[-1], yRLAshifted[0], Ntrans)
-    transitiony = np.linspace(zvals[-1], zRLAshifted[0], Ntrans)
-
-    xvals = np.concatenate((xvals, transitionx, xRLAshifted))
-    yvals = np.concatenate((yvals, transitiony_hor, yRLAshifted))
-    zvals = np.concatenate((zvals, transitiony, zRLAshifted))
+    xw = np.concatenate((xw, trans_x, xw2_shifted))
+    yw = np.concatenate((yw, trans_y, yw2_shifted))
+    zw = np.concatenate((zw, trans_z, zw2_shifted))
 
     dpdx1 = lattice1.dpdx(u1)
     dpdx2 = lattice2.dpdx(u2)  # still local
-    dpdxtrans = np.full_like(transitionx, 0.0)
+    dpdxtrans = np.full_like(trans_x, 0.0)
     dpdx = np.concatenate((dpdx1, dpdxtrans, dpdx2))
 
     # compute ds for transition using 3D segments
-    ds_trans = get_s_element(transitionx, transitiony_hor, transitiony)
+    ds_trans = get_s_element(trans_x, trans_y, trans_z)
     strans = np.concatenate([[0], np.cumsum(ds_trans)])
 
     total_length = s1[-1] + strans[-1] + s2[-1]
@@ -697,7 +736,7 @@ def append_lattices(
         which_pass_2 = lattice2.which_pass(u2)
         max_pass_1 = np.max(which_pass_1)
         which_pass_2_offset = which_pass_2 + max_pass_1
-        which_pass_trans = np.full_like(transitionx, which_pass_1[-1])
+        which_pass_trans = np.full_like(trans_x, which_pass_1[-1])
         which_pass_combined = np.concatenate(
             (which_pass_1, which_pass_trans, which_pass_2_offset)
         )
@@ -712,7 +751,7 @@ def append_lattices(
         # if we are combining a linac and RLA, the pass is 0 for the linac and then RLA's pass number
         which_pass_2 = lattice2.which_pass(u2)
         linac_pass = np.full_like(u1, 0)
-        which_pass_trans = np.full_like(transitionx, 0)
+        which_pass_trans = np.full_like(trans_x, 0)
         which_pass_combined = np.concatenate(
             (linac_pass, which_pass_trans, which_pass_2)
         )
@@ -725,7 +764,7 @@ def append_lattices(
         )
 
     lattice_dict = create_lattice_dict_from_vertices(
-        (xvals, yvals, zvals), n_elements=len(xvals)
+        (xw, yw, zw), n_elements=len(xw)
     )
 
     kwargs["n_elements"] = lattice1.n_elements + lattice2.n_elements
@@ -734,10 +773,9 @@ def append_lattices(
     lattice_dict.update(kwargs)
 
     lattice = Lattice(**lattice_dict)
-    # vertices format: (x_points, y_points, z_points)
-    # set x_points to longitudinal (xvals), y_points to horizontal (yvals), z_points to vertical (zvals)
-    # Use the combined zvals computed above (do not overwrite with zeros) so vertical shifts are preserved.
-    lattice.vertices = (xvals, yvals, zvals)
+    # vertices in world (x, y, z) order: x = transverse (toward center),
+    # y = vertical, z = longitudinal. Vertical shifts (world y) are preserved.
+    lattice.vertices = (xw, yw, zw)
 
     # combine lattice names
     lattice.name = lattice1.name + "+" + lattice2.name
@@ -773,18 +811,22 @@ def create_elliptical_lattice(
         n_elements (_type_, optional): _description_. Defaults to 10_000.
     """
     theta = np.linspace(0, 2 * np.pi, n_elements)
-    x_ellipse = center[0] + length_major * np.cos(theta)
-    y_ellipse = center[1] + length_minor * np.sin(theta)
+    # Ellipse drawn in the horizontal plane: major axis -> longitudinal (world z),
+    # minor axis -> transverse (world x), world y = 0 (planar).
+    z_world = center[0] + length_major * np.cos(theta)
+    x_world = center[1] + length_minor * np.sin(theta)
+    y_world = np.zeros_like(z_world)
 
     lattice_dict = create_lattice_dict_from_vertices(
-        (x_ellipse, y_ellipse), n_elements=n_elements
+        (x_world, y_world, z_world), n_elements=n_elements
     )
 
     # Any additional user-input
     lattice_dict.update(kwargs)
 
     lattice = Lattice(**lattice_dict)
-    lattice.vertices = (x_ellipse, y_ellipse)
+    # vertices in world (x, y, z) order
+    lattice.vertices = (x_world, y_world, z_world)
 
     return lattice
 
@@ -829,7 +871,15 @@ def advance_in_pos(x0, y0, theta_0, dtheta, ds):
 
 
 def create_lattice_dict_from_vertices(vertices, n_elements=None):
-    # Accept either (x, y) or (x, y, z) vertices. If only 2D provided, z is set to zeros.
+    """Build world-coordinate lattice interpolants from a curve of central-orbit
+    vertices.
+
+    Vertices are given in WORLD coordinates:
+        x -> toward the center of the ring (+x to center),
+        y -> up (0 for a planar ring),
+        z -> tangential, along the beam direction of travel.
+    Accept either (x, y) [planar, y=0] or (x, y, z) vertices.
+    """
     if len(vertices) == 2:
         x_points, y_points = vertices
         z_points = np.zeros_like(x_points)
@@ -882,8 +932,10 @@ def create_lattice_dict_from_vertices(vertices, n_elements=None):
     ty = dy_ds / tangent_mag
     tz = dz_ds / tangent_mag
 
-    # Keep backward-compatible single angle (projection in xy-plane)
-    angle_dense = np.arctan2(dy_ds, dx_ds)
+    # Tangent angle in the horizontal z-x plane, measured from +z toward +x.
+    # (Used only for plotting / backward compatibility; the physics uses the full
+    # 3D world tangent above.)
+    angle_dense = np.arctan2(dx_ds, dz_ds)
 
     # Normalize to u ∈ [0, 1]
     u = np.linspace(0, 1, n_elements)

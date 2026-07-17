@@ -10,6 +10,7 @@ from mint import mudecay_tools
 from mint import detector_tools
 from mint import collider_tools
 from mint import lattice_tools
+from mint import hnl_tools
 from mint import MuC
 
 __all__ = [
@@ -19,6 +20,7 @@ __all__ = [
     "detector_tools",
     "collider_tools",
     "lattice_tools",
+    "hnl_tools",
     "MuC",
 ]
 

@@ -185,37 +185,34 @@ class MuDecaySimulator:
         return self.weights_new_pol
 
     def place_muons_on_lattice(self, lattice=None, direction="clockwise"):
-        """Changes the coordinate axis, position, and momenta of particles to fit a storage ring geometry.
+        """Place muon decays on the storage-ring central orbit and rotate their
+        momenta into the world (lab) frame.
 
-        For the lattice, x is horizontal and y is vertical directions in the transverse plane.
+        World-coordinate convention (identical in the lab frame and the
+        beam-comoving frame):
+            x -- toward the center of the ring (+x points to the center),
+            y -- up, out of the ring plane (+y above the plane),
+            z -- tangential, along the beam direction of travel.
+        Momenta px, py, pz follow the same convention.
 
-        lattice: dictionary with smooth function that describes the lattice (created from interpolation of .tfs files)
+        The lattice returns world coordinates directly, so placement is a near
+        identity: `pos = (lattice.x, lattice.y, lattice.z)(u)` plus transverse
+        beam-envelope offsets, and momenta are rotated from the local beam frame
+        (horizontal, vertical, tangential) onto the local world tangent.
 
-            each function returns the value of the lattice parameter as a function of a parameter `u`:
-                `u` goes from 0 to 1, with 0 being the IP and 1 being the IP again after a full central orbit.
+        lattice: an lt.Lattice (or dict) describing the central orbit. Each field
+            is a smooth function of a parameter `u` in [0, 1] (0 = IP, 1 = IP again
+            after a full orbit):
+                lattice.x/y/z(u): world position of the central orbit,
+                lattice.s(u):     arc length along the orbit,
+                lattice.inv_s(s): inverse of s(u),
+                lattice.tangent(u): world unit tangent [tx, ty, tz] of the orbit,
+                lattice.angle_of_central_p(u): tangent angle in the horizontal
+                    z-x plane (for plotting only).
 
-            lattice['x']: x position of the muons
-            lattice['y']: y position of the muons
-            lattice['s']: s displacement of the muons along lattice
-            lattice['t']: time of the muons
-            lattice['angle_of_central_p']: angle of the central momentum of the muons (tangent to the central orbit)
-
-            lattice['inv_s']: inverse function of s(u) -- it returns u(s) s.t. lattice['inv_s'](lattice['s'](u)) = u
-
-        NOTE: the difference between coordinate systems in MuC and in the lattice
-
-          Lattice reference:
-         x -- horizontal (ring) plane
-         y -- vertical plane
-         z -- longitudinal along motion
-
-         In MuC code:
-         x -- normal to the ring (downwards when looking from the IP to the center of the ring)
-         y -- horizontal plane (+y exits moves outwards from IP away from the ring)
-         z -- along motion tangent to the ring at the IP (+z is a beam from left to right at the IP)
-
-         So in our code, horizontal ~ y, vertical ~ x, and z ~ z
-
+        direction: "clockwise" (reference beam, travels along +tangent) or
+            "counter-clockwise" (counter-circulating beam, same orbit, momenta
+            reversed to travel along -tangent).
         """
 
         if isinstance(lattice, dict):
@@ -260,7 +257,9 @@ class MuDecaySimulator:
         else:
             beam_p = lattice.beam_p0(u_parameter) * np.ones(self.sample_size)
 
-        # Set the muon 4-momenta along lattice
+        # Build the muon 4-momentum in the LOCAL beam-comoving frame, with the beam
+        # travelling along +z, the horizontal transverse direction along local x, and
+        # the vertical direction along local y (same axis roles as the world frame).
         self.pmu = vector.array(
             {
                 "E": np.sqrt(beam_p**2 + const.m_mu**2),
@@ -270,30 +269,30 @@ class MuDecaySimulator:
             }
         )
 
-        # Adding the beam transverse divergence
-        # Handle beam divergence (can be function or constant)
-
+        # Beam transverse divergence, sampled from the local envelopes:
+        #   beamdiv_x -> horizontal (local x),  beamdiv_y -> vertical (local y).
         if self.beam_dynamics:
-            # Rotation in 2D commutes, so as long as we only rotation in transverse plane
-            theta_x = np.random.normal(
+            theta_h = np.random.normal(
                 loc=0.0,
                 scale=lattice.beamdiv_x(u_parameter),
                 size=self.sample_size,
             )
-            theta_y = np.random.normal(
+            theta_v = np.random.normal(
                 loc=0.0,
                 scale=lattice.beamdiv_y(u_parameter),
                 size=self.sample_size,
             )
         else:
-            theta_x = 0.0
-            theta_y = 0.0
+            theta_h = 0.0
+            theta_v = 0.0
 
-        # Rotate by beam divergence envelope
-        self.pmu = self.pmu.rotateX(-np.arctan(theta_x))
-        self.pmu = self.pmu.rotateY(np.arctan(theta_y))
+        # Apply the divergence in the local frame. rotateY bends +z into local x
+        # (horizontal); rotateX bends +z into local y (vertical). This keeps the
+        # horizontal/vertical divergences aligned with the x/y axes.
+        self.pmu = self.pmu.rotateY(np.arctan(theta_h))
+        self.pmu = self.pmu.rotateX(-np.arctan(theta_v))
 
-        # Boost the neutrino 4 momenta
+        # Boost the neutrino 4-momenta into the same local beam-comoving frame.
         self.pnu = self.pnu_restframe.boost_p4(self.pmu)
 
         # Absolute velocity of muons
@@ -351,28 +350,16 @@ class MuDecaySimulator:
         # print("mu times: ",self.mutimes)
         # print("after:", sum(self.weights[:, 0]))
 
-        # Now deform locations to real space along the lattice
+        # Now place the decays in world coordinates along the central orbit.
+        # The lattice returns world coordinates directly:
+        #   x -> toward the ring center, y -> up, z -> tangential (travel direction).
+        self.pos["x"] = lattice.x(u_parameter)
+        self.pos["y"] = lattice.y(u_parameter)
+        self.pos["z"] = lattice.z(u_parameter)
 
-        # put everyone in the z axis (arc-length) as a fallback
-        self.pos["z"] = self.s_in_turn
-
-        # If lattice provides z(u), use full 3D coordinates; otherwise
-        # keep the previous mapping (z <- lattice.x, x <- lattice.y, y <- 0)
-        if hasattr(lattice, "z"):
-            self.pos["x"] = lattice.x(u_parameter)
-            self.pos["y"] = lattice.y(u_parameter)
-            self.pos["z"] = lattice.z(u_parameter)
-        else:
-            # Place in xz-plane with y being vertical (backwards-compatible mapping)
-            self.pos["z"] = lattice.x(u_parameter)
-            self.pos["x"] = lattice.y(u_parameter)
-            self.pos["y"] = np.zeros(self.sample_size)
-
-        # If lattice provides a 3D tangent, build local transverse basis and map
-        # muons/neutrinos directly into 3D world coordinates. Otherwise
-        # fall back to the previous planar rotateX + sin/cos projection.
+        # Sample the transverse beam envelopes (0 if beam dynamics are disabled).
+        #   beamsize_x -> horizontal offset,  beamsize_y -> vertical offset.
         if self.beam_dynamics:
-            # Sample transverse beam envelopes
             x_horizontal = np.random.normal(
                 loc=0.0,
                 scale=lattice.beamsize_x(u_parameter),
@@ -387,148 +374,69 @@ class MuDecaySimulator:
             x_horizontal = np.zeros(self.sample_size)
             x_vertical = np.zeros(self.sample_size)
 
-        if hasattr(lattice, "tangent"):
-            # lattice.tangent(u) returns stacked array [3, N]
-            t_stack = lattice.tangent(u_parameter)
-            # ensure shape (3, N)
-            t_stack = np.asarray(t_stack)
-            if t_stack.shape[0] != 3:
-                t_stack = t_stack.reshape(3, -1)
+        # World unit tangent of the central orbit at each decay point, [3, N].
+        t_stack = np.asarray(lattice.tangent(u_parameter))
+        if t_stack.shape[0] != 3:
+            t_stack = t_stack.reshape(3, -1)
+        tx, ty, tz = t_stack[0, :], t_stack[1, :], t_stack[2, :]
+        tnorm = np.sqrt(tx**2 + ty**2 + tz**2)
+        tnorm[tnorm == 0] = 1.0
+        tx, ty, tz = tx / tnorm, ty / tnorm, tz / tnorm
 
-            txL = t_stack[0, :]
-            tyL = t_stack[1, :]
-            tzL = t_stack[2, :]
-
-            # Remap lattice-local tangent components (xL,yL,zL) to world axes (xW,yW,zW):
-            # xW = yL, yW = zL, zW = xL
-            tx = tyL
-            ty = tzL
-            tz = txL
-
-            # normalize just in case
-            tnorm = np.sqrt(tx**2 + ty**2 + tz**2)
-            tnorm[tnorm == 0] = 1.0
-            tx /= tnorm
-            ty /= tnorm
-            tz /= tnorm
-
-            # Choose a reference vector for constructing a transverse axis. Prefer z-axis.
-            ref_x = np.zeros_like(tx)
-            ref_y = np.zeros_like(ty)
-            ref_z = np.ones_like(tz)
-
-            # cross(ref, t) -> n1 (may be small if t ~ ref)
-            n1_x = ref_y * tz - ref_z * ty
-            n1_y = ref_z * tx - ref_x * tz
-            n1_z = ref_x * ty - ref_y * tx
-
-            n1_mag = np.sqrt(n1_x**2 + n1_y**2 + n1_z**2)
-            # where n1 magnitude is too small (t roughly parallel ref), use y-axis as ref
-            small = n1_mag < 1e-8
-            if np.any(small):
-                # alternate ref = y-axis
-                ref_x2 = np.zeros_like(tx)
-                ref_y2 = np.ones_like(ty)
-                ref_z2 = np.zeros_like(tz)
-                n1_x2 = ref_y2 * tz - ref_z2 * ty
-                n1_y2 = ref_z2 * tx - ref_x2 * tz
-                n1_z2 = ref_x2 * ty - ref_y2 * tx
-                n1_x[small] = n1_x2[small]
-                n1_y[small] = n1_y2[small]
-                n1_z[small] = n1_z2[small]
-                n1_mag = np.sqrt(n1_x**2 + n1_y**2 + n1_z**2)
-
-            # normalize n1
-            n1_x /= n1_mag
-            n1_y /= n1_mag
-            n1_z /= n1_mag
-
-            # n2 = t cross n1
-            n2_x = ty * n1_z - tz * n1_y
-            n2_y = tz * n1_x - tx * n1_z
-            n2_z = tx * n1_y - ty * n1_x
-
-            # normalize n2
-            n2_mag = np.sqrt(n2_x**2 + n2_y**2 + n2_z**2)
-            n2_mag[n2_mag == 0] = 1.0
-            n2_x /= n2_mag
-            n2_y /= n2_mag
-            n2_z /= n2_mag
-
-            # Base lattice position (center of beam)
-            # Map lattice coordinates (xL,yL,zL) to world coords (xW,yW,zW):
-            # xW = yL, yW = zL, zW = xL
-            self.pos["x"] = lattice.y(u_parameter)
-            self.pos["y"] = lattice.z(u_parameter)
-            self.pos["z"] = lattice.x(u_parameter)
-
-            # Offsets in world coords: horizontal -> n1, vertical -> n2
-            self.pos["x"] = self.pos["x"] + x_horizontal * n1_x + x_vertical * n2_x
-            self.pos["y"] = self.pos["y"] + x_horizontal * n1_y + x_vertical * n2_y
-            self.pos["z"] = self.pos["z"] + x_horizontal * n1_z + x_vertical * n2_z
-
-            # Map particle momenta (px,py,pz) from local beam frame into world frame via basis
-            # local frame: (n1, n2, t) basis; pmu stores px,py,pz in that local frame
-            pmu_px = self.pmu["px"]
-            pmu_py = self.pmu["py"]
-            pmu_pz = self.pmu["pz"]
-
-            new_pmu_x = pmu_px * n1_x + pmu_py * n2_x + pmu_pz * tx
-            new_pmu_y = pmu_px * n1_y + pmu_py * n2_y + pmu_pz * ty
-            new_pmu_z = pmu_px * n1_z + pmu_py * n2_z + pmu_pz * tz
-
-            self.pmu["px"] = new_pmu_x
-            self.pmu["py"] = new_pmu_y
-            self.pmu["pz"] = new_pmu_z
-
-            # Do the same mapping for neutrino momenta (they are in self.pnu)
-            try:
-                pnu_px = self.pnu["px"]
-                pnu_py = self.pnu["py"]
-                pnu_pz = self.pnu["pz"]
-
-                new_pnu_x = pnu_px * n1_x + pnu_py * n2_x + pnu_pz * tx
-                new_pnu_y = pnu_px * n1_y + pnu_py * n2_y + pnu_pz * ty
-                new_pnu_z = pnu_px * n1_z + pnu_py * n2_z + pnu_pz * tz
-
-                self.pnu["px"] = new_pnu_x
-                self.pnu["py"] = new_pnu_y
-                self.pnu["pz"] = new_pnu_z
-            except Exception:
-                # if pnu doesn't have component access, skip explicit remap
-                pass
-
-            # If direction requires flipping (counter-clockwise), flip the tangent/basis
-            if direction == "counter-clockwise":
-                self.pos["x"] = -1 * self.pos["x"]
-                self.pnu["px"] = -1 * self.pnu["px"]
-                self.pmu["px"] = -1 * self.pmu["px"]
-
-        else:
-            # Backwards-compatible planar behavior
-            theta_central_orbit = lattice.angle_of_central_p(u_parameter)
-            self.pnu = self.pnu.rotateX(-theta_central_orbit)
-            self.pmu = self.pmu.rotateX(-theta_central_orbit)
-
-            # vertical stays in y
-            self.pos["y"] = self.pos["y"] + x_vertical
-            self.pos["x"] = self.pos["x"] + x_horizontal * np.sin(theta_central_orbit)
-            self.pos["z"] = self.pos["z"] + x_horizontal * np.cos(theta_central_orbit)
-
-        # Shift time so t = 0 is bunch crossing (NOTE: mutimes will always be negative.)
-        t_per_turn = C / self.vmu
-        time_in_this_turn = self.mutimes % t_per_turn
-        self.mutimes_to_bunchx = np.where(
-            time_in_this_turn < t_per_turn / 2,  # in first half of turn
-            time_in_this_turn,  # time wrt bunch xs is + (past crossing)
-            time_in_this_turn - t_per_turn,  # time wrt bunch xs is - (future crossing)
-        )
-
-        # if right moving, then mirror trajectories through y axis
+        # Counter-circulating beam: same central orbit, opposite travel direction.
+        # Reverse the tangent so the momenta point the other way (positions unchanged).
         if direction == "counter-clockwise":
-            self.pos["x"] = -1 * self.pos["x"]
-            self.pnu = self.pnu.rotateX(np.pi)
-            self.pmu = self.pmu.rotateX(np.pi)
+            tx, ty, tz = -tx, -ty, -tz
+
+        # Build a transverse basis aligned with the world vertical and horizontal:
+        #   n_v -> vertical (world +y made perpendicular to t),
+        #   n_h = t x n_v -> horizontal, in the ring plane, perpendicular to t.
+        evt = ty  # world +y . t
+        nv_x = -evt * tx
+        nv_y = 1.0 - evt * ty
+        nv_z = -evt * tz
+        nv_mag = np.sqrt(nv_x**2 + nv_y**2 + nv_z**2)
+        nv_mag[nv_mag == 0] = 1.0
+        nv_x, nv_y, nv_z = nv_x / nv_mag, nv_y / nv_mag, nv_z / nv_mag
+
+        nh_x = ty * nv_z - tz * nv_y
+        nh_y = tz * nv_x - tx * nv_z
+        nh_z = tx * nv_y - ty * nv_x
+        nh_mag = np.sqrt(nh_x**2 + nh_y**2 + nh_z**2)
+        nh_mag[nh_mag == 0] = 1.0
+        nh_x, nh_y, nh_z = nh_x / nh_mag, nh_y / nh_mag, nh_z / nh_mag
+
+        # Transverse offsets: horizontal along n_h, vertical along n_v.
+        self.pos["x"] = self.pos["x"] + x_horizontal * nh_x + x_vertical * nv_x
+        self.pos["y"] = self.pos["y"] + x_horizontal * nh_y + x_vertical * nv_y
+        self.pos["z"] = self.pos["z"] + x_horizontal * nh_z + x_vertical * nv_z
+
+        # Map momenta from the local beam frame (n_h, n_v, t) into the world frame:
+        #   local px -> n_h (horizontal), py -> n_v (vertical), pz -> t (tangential).
+        for p in (self.pmu, self.pnu):
+            # Copy the components first: p["px"] returns a view, so we must not
+            # overwrite px before py/pz are read.
+            px = np.array(p["px"])
+            py = np.array(p["py"])
+            pz = np.array(p["pz"])
+            p["px"] = px * nh_x + py * nv_x + pz * tx
+            p["py"] = px * nh_y + py * nv_y + pz * ty
+            p["pz"] = px * nh_z + py * nv_z + pz * tz
+
+        # Time relative to the bunch crossing at the interaction point (IP).
+        # The IP is the point of the central orbit at the world origin (0, 0, 0)
+        # -- the same origin the detectors are placed relative to. mutimes_to_bunchx
+        # is 0 for a muon exactly at the IP, positive just after it (already crossed),
+        # and negative just before it (about to cross).
+        u_grid = np.linspace(0.0, 1.0, 20001)
+        dist2_to_origin = (
+            lattice.x(u_grid) ** 2 + lattice.y(u_grid) ** 2 + lattice.z(u_grid) ** 2
+        )
+        s_IP = float(lattice.s(u_grid[np.argmin(dist2_to_origin)]))
+
+        # Signed arc distance from the IP within one turn, wrapped to [-C/2, C/2).
+        delta_s = (self.s_in_turn - s_IP + C / 2.0) % C - C / 2.0
+        self.mutimes_to_bunchx = delta_s / self.vmu
 
         # print("sample_size:", self.sample_size)
         # print(
