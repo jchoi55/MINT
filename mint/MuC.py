@@ -9,6 +9,34 @@ from mint import lattice_tools as lt
 
 
 class MuDecaySimulator:
+    """Muon decays along an accelerator lattice, and the neutrinos they make.
+
+    The generator samples the muon rest-frame decay phase space once with vegas,
+    then places those decays on a lattice: each muon gets a position along the
+    ring, a momentum drawn from the local beam envelope, and a boost to the lab
+    frame. What comes out is a weighted sample of neutrinos, with the weights
+    normalised so they sum to the number of muon decays per injection.
+
+    Typical use::
+
+        ring = mint.lattices.load("mc_10tev_hybrid_v06")
+        sim = MuDecaySimulator(muon_polarization=0.0, lattice=ring,
+                               nuflavor="numubar", n_evals=1e5)
+        sim.decay_muons()
+        sim.place_muons_on_lattice(lattice=ring, direction="clockwise")
+
+    Because the rest-frame sample is flavor- and polarization-independent, any
+    other flavor is an exact reweighting of the same events rather than a new
+    vegas run::
+
+        sim_nue = sim.reweighted_copy(nuflavor="nue")
+        sim_nue.place_muons_on_lattice(lattice=ring, direction="clockwise")
+
+    That is what makes :func:`mint.examples.both_beams` cheap: one generation,
+    four flavors. Use :meth:`save_events` / :meth:`load_events` to reuse a
+    sample across sessions.
+    """
+
     def __init__(
         self,
         muon_polarization,
@@ -25,22 +53,43 @@ class MuDecaySimulator:
         aperture_nsigma=5.0,
     ):
         """
-        This class is the main simulation class for muon decays in a lattice.
-
-        Parameters:
-
-            design (dict): Dictionary containing the design parameters.
-            nuflavor (str, optional): Neutrino flavor, either 'numu' or 'nuebar'. Defaults to None.
-            cycles (float, optional): number of times the muons pass through lattice.
-            direction (str, optional): Direction of the beam, either 'left' or 'right'. Defaults to "left".
-            n_evals (float, optional): Number of VEGAS evaluations. Defaults to 1e5.
-            preloaded_events (dict, optional): Dictionary of preloaded events. Defaults to None.
-            remove_ring_fraction (float, optional): Fraction of the ring to be removed.
-                    Can be a tuple for beginning and end points to be removed or a float if it's the same.
-                    Defaults to 0 (entire ring).
-            NLO (bool, optional): Next-to-leading order muon decay (radiative corrections). Defaults to True.
-            mudecay_model (str, optional): Model for muon decay. Defaults to "NLOmudecay_pol".
-
+        Parameters
+        ----------
+        muon_polarization : float
+            Longitudinal muon polarization, in [-1, 1]. 0 for an unpolarized beam.
+        lattice : mint.lattice_tools.Lattice, optional
+            The machine to place decays on. Required unless you only want
+            rest-frame events, and required when ``cycles="full_injection"``.
+        nuflavor : str, optional
+            Which neutrino to keep: ``"numu"``, ``"numubar"``, ``"nue"`` or
+            ``"nuebar"``. The mu+ beam makes numubar and nue; mu- the conjugates.
+        cycles : float or str
+            Turns each muon makes. ``"full_injection"`` computes the number of
+            turns in one injection period from the lattice, which is what the
+            standard setups use.
+        direction : str
+            ``"clockwise"`` or ``"counterclockwise"``. Sets which way the beam
+            travels, and hence which detector sees it.
+        n_evals : float
+            vegas evaluations for the rest-frame sample. Raise for more
+            statistics; everything else is a reweighting of it.
+        preloaded_events : dict, optional
+            A sample from :meth:`save_events`, to skip generation entirely.
+        remove_ring_fraction : float or tuple
+            Fraction of the ring to exclude from decay placement. A float
+            removes a centred span; a tuple gives explicit start and end points.
+            0 keeps the whole ring.
+        NLO : bool
+            Include the O(alpha) radiative corrections to muon decay.
+        mudecay_model : str
+            Matrix element to sample. The default is the polarized NLO one.
+        beam_dynamics : bool
+            If False, put every muon on the ideal closed orbit with no
+            divergence, envelope or momentum spread -- useful for isolating what
+            the optics contribute.
+        aperture_nsigma : float
+            Collimate the transverse beam at this many sigma, mirroring the
+            machine's physical aperture. None keeps the untruncated Gaussian.
         """
 
         # Design contains all necessary inputs to specify the muon storage/accelerator
@@ -716,7 +765,7 @@ class MuDecaySimulator:
 
     def get_flux_at_generic_location(
         self,
-        det_location=[0, 0, 1e5],
+        det_location=None,
         det_radius=1e2,
         ebins=100,
         E_range=None,
@@ -728,6 +777,8 @@ class MuDecaySimulator:
 
         if mask is None:
             mask = np.ones(self.sample_size, dtype=bool)
+        if det_location is None:
+            det_location = [0.0, 0.0, 1e5]      # 1 km downstream, on axis
         det_location = np.asarray(det_location)
         if det_location.shape != (3,):
             raise ValueError("det_location must be a list or array of length 3.")
@@ -787,8 +838,6 @@ class MuDecaySimulator:
         else:
             print("No flux through detector.")
             return ebins, 0 * ebins[:-1]
-
-
 
 
 def get_flux(x, w, nbins):
