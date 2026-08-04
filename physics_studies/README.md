@@ -3,12 +3,12 @@
 The studies behind the MINT forward-neutrino paper. Nothing here is part of the
 `mint` package — these notebooks import MINT, and a few external tools, as
 libraries. If you want to understand the simulation itself rather than its
-results, start with [`../dev_examples/`](../dev_examples/).
+results, start with [`../MINT_examples/`](../MINT_examples/).
 
 Run them from this directory:
 
 ```bash
-cd physics-examples
+cd physics_studies
 jupyter lab
 ```
 
@@ -25,7 +25,7 @@ E, w = det.face_flux(sims["numubar"], exposure=ipy)
 `mint.examples.both_beams` generates the muon-decay simulation once and derives
 every flavor from it by exact reweighting, placing the μ⁺ beam clockwise and the
 μ⁻ beam counter-clockwise. `mint.detectors.benchmark` is the detector described
-in `../dev_examples/benchmark_detector.ipynb`: a conical aperture opening from
+in `../MINT_examples/benchmark_detector.ipynb`: a conical aperture opening from
 1.3 m to 2.4 m at 5 km from the interaction point, whose **signal volume** — the
 vertex tracker plus the argon TPC, 3.2 t and 43 g/cm² — is what all quoted rates
 use. If you want more statistics, raise `n_evals`; nothing is precomputed.

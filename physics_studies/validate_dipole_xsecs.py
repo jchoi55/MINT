@@ -1,6 +1,6 @@
 """Validation suite for the dipole-portal production cross sections in hnl_tools.py.
 
-Run from physics-examples/:  python validate_dipole_xsecs.py
+Run from physics_studies/:  python validate_dipole_xsecs.py
 
 Three independent checks (requires the DarkNews dev branch with the DIS regime,
 and the CT18NNLO grid for the `parton` backend: `python -m parton install CT18NNLO`):

@@ -20,7 +20,7 @@ overridden on the fly::
     det = mint.detectors.load("benchmark_5km", n_sigma=3.0)
 
 To describe your own detector, build a :class:`Detector` with your own module
-list rather than subclassing -- see ``dev_examples/benchmark_detector.ipynb``.
+list rather than subclassing -- see ``MINT_examples/benchmark_detector.ipynb``.
 """
 
 

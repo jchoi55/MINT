@@ -75,7 +75,7 @@ print(rates["total"])                              # interactions/year in the si
 
 A detector is a stack of coaxial material volumes, so you can build your own
 geometry by composing `mint.detector_tools` volumes with any `Material`. See
-`dev_examples/benchmark_detector.ipynb` for a worked construction.
+`MINT_examples/benchmark_detector.ipynb` for a worked construction.
 
 **Partial lattices.** If a TFS file covers only part of a machine — an
 interaction region of a larger ring, say — pass the full machine length. Decays
@@ -116,8 +116,8 @@ gzipped, both work.
 | `mint/mudecay_tools.py` | Polarized (N)LO muon-decay matrix elements and the vegas generator |
 | `mint/xsecs.py` | Neutrino cross sections (DIS, elastic, tridents, resonances) |
 | `mint/lattice_data/` | MAD-X TWISS files shipped with the package |
-| `dev_examples/` | How the simulation works — beam optics, detector, rates, accelerator chain |
-| `physics-examples/` | The physics studies behind the paper |
+| `MINT_examples/` | How the simulation works — beam optics, detector, rates, accelerator chain |
+| `physics_studies/` | The physics studies behind the paper |
 | `tests/` | The invariants the results depend on (`pytest tests/`) |
 
 ## Tests
@@ -144,7 +144,7 @@ Matheus Hostert and Joel Choi.
 
 If you use MINT, please cite the accompanying paper, and the software itself via
 `CITATION.cff` (GitHub's "Cite this repository" button renders it). The studies
-the paper reports are in `physics-examples/`.
+the paper reports are in `physics_studies/`.
 
 ## Building distributions
 

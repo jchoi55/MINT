@@ -3,13 +3,13 @@
 Four notebooks covering the machinery: the beam, the detector, the rates, and
 the accelerator stages that feed them. Read these if you want to understand or
 extend the simulation. For the physics results in the paper, see
-[`../physics-examples/`](../physics-examples/).
+[`../physics_studies/`](../physics_studies/).
 
 Run them from this directory, so that the relative paths to `data/` and
 `plots/` resolve:
 
 ```bash
-cd dev_examples
+cd MINT_examples
 jupyter lab
 ```
 
@@ -19,6 +19,12 @@ jupyter lab
 | [`benchmark_detector.ipynb`](benchmark_detector.ipynb) | What `mint.detectors.benchmark` builds — aperture, module layout, composition, material budget — and the beamline between it and the IP. Also scans where the detector is best placed. The construction in section 2 is the template for describing your own detector. |
 | [`collider_ring.ipynb`](collider_ring.ipynb) | Event rates at the detector: radial distributions, energy spectra for all four flavors, context against existing neutrino beams, and how the rate falls off between 250 m and 50 km. |
 | [`low_energy_components.ipynb`](low_energy_components.ipynb) | Fluxes from the rest of the accelerator chain — pre-accelerator, both recirculating linacs, and the collider ring — on a common footing. |
+| [`neutrino_slice.ipynb`](neutrino_slice.ipynb) | The neutrinos that pass through the *collider detector itself*: how much material they cross as a function of angle, which subdetector absorbs them, and their radius, time, energy and pseudorapidity distributions. |
+
+`muc_detector.py` describes the muon-collider detector — nozzle, calorimeters,
+solenoid, muon spectrometer — as MINT volumes, and can attach the beamline
+shielding. It replaces a surface-and-traversal-graph description with plain
+volume intersection, so there are no component IDs to keep track of.
 
 `detector_diagnostics.py` holds the helpers that measure a detector against a
 beam: how much of the flux the aperture contains, and what divergence the
