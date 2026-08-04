@@ -90,7 +90,16 @@ def sigma_nutau_cc_avg(E_nu):
 
 def _cone_acceptance(E_nutau, L_rem_cm, det_radius_cm, pt_eff=PT_EFF):
     """Probability that a nu_tau of energy E with Gaussian angular spread
-    theta_s = pt_eff/E (per chain) still crosses the detector face at L_rem."""
+    theta_s = pt_eff/E (per chain) still crosses the detector face at L_rem.
+
+    This is the Rayleigh CDF, 1 - exp(-theta_det^2 / 2 theta_s^2), and it models
+    the chain kinematics as a single effective Gaussian of width pt_eff/E. It
+    is only used by the semi-analytic :func:`nutau_flux_spectrum`. The MC
+    variants sample the decay chain explicitly and apply the exact geometric
+    condition instead, so they do not call this. Where the two disagree, trust
+    the MC: the Gaussian here is a summary of the angular spread, not a
+    derivation of it.
+    """
     theta_det = det_radius_cm / np.maximum(L_rem_cm, det_radius_cm)
     theta_s = pt_eff / np.maximum(E_nutau, 1e-6)
     return 1.0 - np.exp(-(theta_det**2) / (2.0 * theta_s**2))
@@ -380,9 +389,16 @@ def nutau_flux_spectrum_mc(
     Ec, W, nuflavor, rock, s_rock_start_cm, s_rock_end_cm, det_dist_cm,
     det_radius_cm, Enu_edges, n_mc=400_000, rng=0,
 ):
-    """MC version of nutau_flux_spectrum with sampled chain kinematics and a
-    hard geometric acceptance (on-axis primaries): theta x L_rem < R_det.
-    Returns (flux_Ds_line, flux_tau_line) [nu/yr/bin] through the face."""
+    """MC version of :func:`nutau_flux_spectrum` with sampled chain kinematics.
+
+    The acceptance here is the exact geometric condition theta * L_rem < R_det
+    applied to each sampled neutrino, rather than the Gaussian-cone factor the
+    semi-analytic version uses. This is the authoritative path -- the published
+    rates come from it, with the semi-analytic version kept as the cheap
+    first estimate to check it against.
+
+    Returns (flux_Ds_line, flux_tau_line) [nu/yr/bin] through the face.
+    """
     rng_ = np.random.default_rng(rng)
     Ec = np.atleast_1d(np.asarray(Ec, float))
     W = np.atleast_1d(np.asarray(W, float))
