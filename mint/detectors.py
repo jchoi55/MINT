@@ -74,6 +74,7 @@ class Module:
 
     @property
     def thickness(self):
+        """Longitudinal extent of the module [cm]."""
         return self.z1 - self.z0
 
 
@@ -216,6 +217,7 @@ class Detector:
 
     @property
     def radius_back(self):
+        """Aperture radius at the downstream end of the detector [cm]."""
         return float(self.aperture(self.Z_MUON1))
 
     @property
@@ -467,6 +469,7 @@ class Detector:
         return tot
 
     def interaction_lengths(self, kinds=None):
+        """Hadronic interaction lengths along the axis, summed over modules."""
         tot = 0.0
         for m in self.modules:
             if kinds is not None and m.kind not in kinds:
@@ -522,11 +525,16 @@ class Detector:
 
     # ---- surroundings ------------------------------------------------------
     def rock_length(self, dist=None):
+        """Thickness of rock upstream of the face [cm].
+
+        Zero if the detector sits at or inside where the rock begins.
+        """
         D = self.dist if dist is None else dist
         return max(D - self.gap - self.rock_start, 0.0)
 
     @property
     def rock_column(self):
+        """Nucleon column density of the upstream rock [1/cm^2]."""
         return self.rock_length()
 
     # ---- flux helpers (same signatures as ForwardDetector) -----------------
@@ -549,6 +557,11 @@ class Detector:
         return E[m], w[m], rx[m], ry[m], (vx / vz)[m], (vy / vz)[m]
 
     def face_flux(self, sim, sign=+1, exposure=1.0, E_min=0.0, dist=None):
+        """(E, weight) of the neutrinos crossing the front face.
+
+        A convenience wrapper over :meth:`face_rays` that drops the positions
+        and angles. Multiply ``exposure`` by injections per year to get a rate.
+        """
         E, w, *_ = self.face_rays(sim, sign=sign, E_min=E_min,
                                   exposure=exposure, dist=dist)
         return E, w

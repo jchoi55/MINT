@@ -34,6 +34,13 @@ class Material:
 
 
 class CompositMaterial:
+    """A material made of several nuclei, e.g. rock or a plastic scintillator.
+
+    Its ``Z`` and ``A`` are mass-weighted averages, which makes them useful for
+    column densities but **not** a nucleus: anything that needs an actual
+    target nucleus (a coherent cross section, a nuclei density) must go through
+    :func:`dominant_nucleus` instead.
+    """
     def __init__(self, table):
         """Compositions of materials.
         fraction is the percentage of it that occupies the total material
@@ -387,6 +394,7 @@ class ConeVolume:
     # -- geometry ------------------------------------------------------------
     @property
     def length(self):
+        """Longitudinal extent of the cone [cm]."""
         return self.z1 - self.z0
 
     @property
@@ -404,6 +412,7 @@ class ConeVolume:
                 * (self.r0**2 + self.r0 * self.r1 + self.r1**2))
 
     def contains(self, x, y, z):
+        """Boolean mask: which of the given points lie inside the volume."""
         r = np.hypot(np.asarray(x, float) - self.center[0],
                      np.asarray(y, float) - self.center[1])
         z = np.asarray(z, float)
