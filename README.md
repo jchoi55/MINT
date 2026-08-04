@@ -5,12 +5,13 @@
 
 <img src="assets/mint-logo.svg" alt="MINT logo" width="120" />
 
-Neutrino fluxes at muon facilities — muon colliders, neutrino factories, and
-muon accelerator stages. MINT decays muons along realistic accelerator lattices
-(built from MAD-X TWISS/TFS tables or simple parametric geometries), including
-polarization, NLO radiative corrections to the decay, and beam optics
-(envelope, divergence, momentum spread), and propagates the neutrinos to
-arbitrary detector locations.
+Neutrino fluxes at muon colliders and neutrino factories.
+MINT decays muons along realistic accelerator lattices
+(built from MAD-X TFS tables or simple parametric geometries), including
+polarization, radiative corrections to the decay, and beam optics
+(beam size and divergence). 
+It also propagates the neutrinos to
+arbitrary detector locations and estimates neutrino event rates with ray tracing through detector geometries.
 
 ## Installation
 
@@ -51,9 +52,8 @@ E, flux = sim.get_flux_at_generic_location(
 )
 ```
 
-**Run vegas once, reuse forever.** The event generation only samples the
-rest-frame decay phase space; flavor, polarization, and NLO are exact
-matrix-element reweights of the same sample:
+**Vegas and caching.** The event generation only samples the
+rest-frame muon decay phase space. Flavor, polarization, and radiative corrections are implemented by reweighting matrix-elements with the same sample:
 
 ```python
 sim_nue = sim.reweighted_copy(nuflavor="nue")      # no new vegas run
@@ -63,7 +63,7 @@ sim.save_events("mudecays.npz")                    # persist the sample ...
 sim2 = mint.MuDecaySimulator.load_events("mudecays.npz", lattice=ring)  # ... reuse later
 ```
 
-**Interaction vertices in a detector.** Ray-trace the placed neutrinos through
+**Interaction vertices.** Ray-trace the placed neutrinos through
 a detector and generate weighted interaction vertices, with exponential
 attenuation along each chord and upstream shielding included:
 
@@ -86,7 +86,7 @@ ring:
 ring = mint.lattices.load("mc_10tev_hybrid_v06", total_circumference=10e5)  # cm
 ```
 
-## Lattices shipped with MINT
+## Lattices in MINT
 
 `mint.lattices.available()` lists these; `load()` takes the name.
 
@@ -136,43 +136,20 @@ closes including muon survival in the store, that the Courant–Snyder envelopes
 are self-consistent, that the detector column densities are what the rates
 assume, and that the cross-section backends agree.
 
-## Authors
-
-Matheus Hostert and Joel Choi.
-
-## How this code was written
+## AI usage 
 
 Parts of this repository were written with the help of an AI assistant (Claude).
-It is worth being clear about which parts, so you know what to trust and what to
-check.
 
-**The physics is ours.** Every scientific decision — what to simulate, which
-approximations are acceptable, the detector designs, the accelerator lattices,
-how to interpret the results, and everything in the accompanying paper — was
-made by the authors. The assistant was not permitted to change physics
-calculations without us approving the change first.
+Scientific decisions from what to simulate, with what approximations, detector choices, the accelerator lattices, how to interpret the results, and everything in the accompanying paper was made by the authors.
 
-**The assistant did a lot of the engineering.** Restructuring the package,
-writing the test suite and the continuous-integration setup, most of the
-docstrings and the explanatory text in the notebooks, and a fair amount of the
-analysis and plotting code. It also found and fixed real bugs, including a
-cross-section function that silently returned the wrong answer for a mistyped
-neutrino flavor, and a factor-of-21 error in a nuclear density.
+The AI assistant was responsible for most of the package structure and import logic, writing the test suite and the continuous-integration setup, vast majority of the docstrings, parts of this README, the explanatory text in the notebooks, lots of debugging, and a fair amount of the analysis and plotting code. 
 
-**It made mistakes too.** Some were caught by us reading its output, some by the
-tests, and some only by running the notebooks end to end — which is why every
-notebook here is executed from a clean kernel before release rather than shipped
-with old results. Where we know something is approximate or unverified, the code
-and notebooks say so.
-
-If you find something wrong, it is our responsibility, not the tool's. Please
-open an issue.
+If you find something wrong, please open an issue or contact us directly.
 
 ## Citation
 
-If you use MINT, please cite the accompanying paper, and the software itself via
-`CITATION.cff` (GitHub's "Cite this repository" button renders it). The studies
-the paper reports are in `physics_studies/`.
+If you use MINT, please cite the accompanying paper (TBD)
+
 
 ## Building distributions
 
