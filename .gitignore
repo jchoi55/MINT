@@ -29,3 +29,9 @@ physics-examples/plots/
 
 # setuptools-scm writes the version here at build time
 mint/_version.py
+
+# Coverage artifacts
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/

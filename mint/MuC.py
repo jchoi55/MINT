@@ -32,7 +32,7 @@ class MuDecaySimulator:
         sim_nue = sim.reweighted_copy(nuflavor="nue")
         sim_nue.place_muons_on_lattice(lattice=ring, direction="clockwise")
 
-    That is what makes :func:`mint.examples.both_beams` cheap: one generation,
+    That is what makes :func:`mint.beams.both_beams` cheap: one generation,
     four flavors. Use :meth:`save_events` / :meth:`load_events` to reuse a
     sample across sessions.
     """

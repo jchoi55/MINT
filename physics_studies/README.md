@@ -17,12 +17,12 @@ Every notebook opens the same way:
 ```python
 import mint
 
-ring, sims, ipy = mint.examples.both_beams()   # one vegas sample, all four flavors
+ring, sims, ipy = mint.beams.both_beams()   # one vegas sample, all four flavors
 det = mint.detectors.benchmark                 # the benchmark forward detector
 E, w = det.face_flux(sims["numubar"], exposure=ipy)
 ```
 
-`mint.examples.both_beams` generates the muon-decay simulation once and derives
+`mint.beams.both_beams` generates the muon-decay simulation once and derives
 every flavor from it by exact reweighting, placing the μ⁺ beam clockwise and the
 μ⁻ beam counter-clockwise. `mint.detectors.benchmark` is the detector described
 in `../MINT_examples/benchmark_detector.ipynb`: a conical aperture opening from

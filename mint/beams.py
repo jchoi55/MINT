@@ -1,4 +1,4 @@
-"""One-call setup for standard MINT physics studies.
+"""One-call setup of the standard beam configurations.
 
 The physics examples all start from the same place: a lattice, a muon-decay
 simulation per neutrino flavor (with exact reweighting between flavors of the
@@ -8,11 +8,11 @@ in one call::
     import mint
 
     # single beam / flavor
-    ring, sim, ipy = mint.examples.standard_beam("numubar")
+    ring, sim, ipy = mint.beams.standard_beam("numubar")
 
     # the full two-beam setup used by the examples: mu+ beam (clockwise:
     # numubar + nue) and mu- beam (counter-clockwise: numu + nuebar)
-    ring, sims, ipy = mint.examples.both_beams()
+    ring, sims, ipy = mint.beams.both_beams()
     sims["numubar"]  # mu+ beam, points at the downstream (+z) detector
     sims["numu"]     # mu- beam, points at the upstream (-z) detector
 

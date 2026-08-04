@@ -27,7 +27,7 @@ def ring():
 @pytest.fixture(scope="module")
 def beam(ring):
     """A small mu+ beam sample: (ring, sim, injections_per_year)."""
-    return mint.examples.standard_beam("numubar", n_evals=5e4, ring=ring)
+    return mint.beams.standard_beam("numubar", n_evals=5e4, ring=ring)
 
 
 # ---------------------------------------------------------------------------
@@ -53,7 +53,7 @@ def test_muon_survival_is_included(beam):
 
 
 def test_muons_per_year_matches_machine_parameters(ring):
-    ipy = mint.examples.injections_per_year(ring)
+    ipy = mint.beams.injections_per_year(ring)
     assert ring.Nmu_per_bunch * ipy == pytest.approx(1.0e20, rel=0.05)
 
 

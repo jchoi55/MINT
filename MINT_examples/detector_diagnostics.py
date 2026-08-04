@@ -8,7 +8,7 @@ here, alongside the notebooks that use them, rather than in ``mint`` itself.
     from detector_diagnostics import spot_quantiles, fit_sigma_div
 
     det = mint.detectors.benchmark
-    ring, sim, ipy = mint.examples.standard_beam("numubar")
+    ring, sim, ipy = mint.beams.standard_beam("numubar")
 
     r39, r86, r96 = spot_quantiles(det, sim)
     print(f"the aperture ({det.radius:.0f} cm) contains "

@@ -9,7 +9,7 @@ A first look::
 
     import mint
 
-    ring, sim, ipy = mint.examples.standard_beam("numubar")
+    ring, sim, ipy = mint.beams.standard_beam("numubar")
     det = mint.detectors.benchmark
     E, w = det.face_flux(sim, exposure=ipy)
 
@@ -18,7 +18,7 @@ The pieces you are most likely to touch:
 ===================  =======================================================
 ``mint.lattices``    load a shipped ring, or build one from your MAD-X TFS
 ``mint.detectors``   the benchmark forward detector, or your own geometry
-``mint.examples``    one-call setups for the standard beam configurations
+``mint.beams``       one-call setups for the standard beam configurations
 ``mint.MuC``         :class:`MuDecaySimulator`, the event generator itself
 ``mint.xsecs``       neutrino cross sections (switchable backends)
 ``mint.plot_tools``  figure styling used by the example notebooks
@@ -41,7 +41,7 @@ from mint import xsecs
 from mint import MuC
 from mint import detectors
 from mint import beamline
-from mint import examples
+from mint import beams
 from mint import plot_tools
 
 # The two classes most users construct directly.
@@ -59,7 +59,7 @@ __all__ = [
     "MuC",
     "detectors",
     "beamline",
-    "examples",
+    "beams",
     "plot_tools",
     "Lattice",
     "MuDecaySimulator",
