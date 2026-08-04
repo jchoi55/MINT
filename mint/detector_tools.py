@@ -466,8 +466,12 @@ class ConeVolume:
         return t_entry, chord
 
 
-class Detector:
-    """A detector made of (non-overlapping) material volumes.
+class VolumeStack:
+    """A set of non-overlapping material volumes that neutrinos can traverse.
+
+    This is the ray-tracing substrate, not a detector model: it knows only
+    where the material is. :class:`mint.detectors.Detector` is what describes
+    an actual detector, and builds one of these on demand.
 
     Given a placed muon-decay simulation, ``generate_interactions`` ray-traces
     every simulated neutrino through the volumes and produces weighted
@@ -613,4 +617,4 @@ def uniform_hydrogen_cylinder(
         center=(0.0, 0.0, distance_cm + length_cm / 2.0),
         name="hydrogen",
     )
-    return Detector([volume], name="uniform_hydrogen_cylinder")
+    return VolumeStack([volume], name="uniform_hydrogen_cylinder")

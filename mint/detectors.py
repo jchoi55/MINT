@@ -373,8 +373,8 @@ class Detector:
         return out
 
     def detector(self, sign=+1, dist=None, kinds=None):
-        """A :class:`mint.detector_tools.Detector` over the module stack."""
-        return dt.Detector(self.volumes(sign=sign, dist=dist, kinds=kinds),
+        """A :class:`mint.detector_tools.VolumeStack` over the module stack."""
+        return dt.VolumeStack(self.volumes(sign=sign, dist=dist, kinds=kinds),
                            name=self.name)
 
     def fiducial_volumes(self, sign=+1, dist=None):

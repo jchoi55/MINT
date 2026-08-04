@@ -60,51 +60,63 @@ sim.save_events("mudecays.npz")                    # persist the sample ...
 sim2 = mint.MuDecaySimulator.load_events("mudecays.npz", lattice=ring)  # ... reuse later
 ```
 
-**Interaction vertices in a detector.** Ray-trace the placed neutrinos through a
-detector geometry and generate weighted interaction vertices (exponential
-attenuation along each chord, upstream-volume shielding included):
+**Interaction vertices in a detector.** Ray-trace the placed neutrinos through
+a detector and generate weighted interaction vertices, with exponential
+attenuation along each chord and upstream shielding included:
 
 ```python
-from mint import detector_tools as dt
-
-detector = dt.uniform_hydrogen_cylinder(distance_cm=1e5)   # 1 g/cm^3 H, 10 m x 2 m diameter
-vertices = detector.generate_interactions(sim, exposure=bunches_per_year)
-vertices[["x", "y", "z", "E", "w"]]                        # weighted vertex sample (DataFrame)
+det = mint.detectors.benchmark                     # the benchmark forward detector
+rates = det.signal_interactions(sim, nuflavor="numubar", exposure=ipy)
+print(rates["total"])                              # interactions/year in the signal volume
 ```
 
-Detectors are lists of material volumes — compose `dt.CylinderVolume`s with any
-`dt.Material` to build segmented geometries.
+A detector is a stack of coaxial material volumes, so you can build your own
+geometry by composing `mint.detector_tools` volumes with any `Material`. See
+`dev_examples/benchmark_detector.ipynb` for a worked construction.
 
-**Partial lattices.** If a TFS file covers only part of a machine (e.g. an
-interaction region of a larger ring), pass the full machine length — decays are
-placed on the covered section while muons age and decay over the whole ring:
+**Partial lattices.** If a TFS file covers only part of a machine — an
+interaction region of a larger ring, say — pass the full machine length. Decays
+are placed on the covered section while the muons age and decay over the whole
+ring:
 
 ```python
 ring = mint.lattices.load("mc_10tev_hybrid_v06", total_circumference=10e5)  # cm
 ```
-
-See `main_collider_ring_studies.ipynb` for the standard validation plots
-(geometry, beam optics, forward flux, event rates).
 
 ## Repository layout
 
 | Path | Contents |
 | --- | --- |
 | `mint/` | The Python package |
-| `mint/MuC.py` | `MuDecaySimulator` — muon decays along a lattice, flux at detectors |
-| `mint/lattices.py` | **User entry point for lattices**: registry of shipped optics, `load()` / `from_tfs()` |
-| `mint/lattice_tools.py` | `Lattice` class and parametric geometries (racetrack, RLA, straight, ...) |
-| `mint/beam_optics.py` | Twiss smoothing: TFS table → beam envelopes/divergences/dispersion |
-| `mint/mudecay_tools.py` | Polarized (N)LO muon-decay matrix elements and vegas generator |
-| `mint/xsecs.py` | Neutrino cross sections (DIS, ES, tridents, resonant channels) |
-| `mint/detector_tools.py` | Materials, detector geometries (`CylinderVolume`, `Detector`), and neutrino interaction-vertex generation |
-| `mint/const.py`, `mint/collider_tools.py`, `mint/plot_tools.py` | Constants, collider parameter sets, plotting style |
+| `mint/MuC.py` | `MuDecaySimulator` — muon decays along a lattice, and the flux they produce |
+| `mint/lattices.py` | Entry point for lattices: the registry of shipped optics, `load()` and `from_tfs()` |
+| `mint/lattice_tools.py` | The `Lattice` class, Twiss smoothing, and parametric geometries |
+| `mint/detectors.py` | The `Detector` class and the `benchmark` instance |
+| `mint/detector_tools.py` | Materials and volumes to build detectors from |
+| `mint/beamline.py` | Shielding and material budget between the IP and the detector |
+| `mint/mudecay_tools.py` | Polarized (N)LO muon-decay matrix elements and the vegas generator |
+| `mint/xsecs.py` | Neutrino cross sections (DIS, elastic, tridents, resonances) |
 | `mint/lattice_data/` | MAD-X TWISS files shipped with the package |
-| `main_collider_ring_studies.ipynb` | Collider-ring validation notebook |
-| `main_RLA_studies.ipynb` | Low-energy accelerator (RLA) studies |
-| `physics-examples/` | Physics case studies built on top of MINT (HNL sensitivity, luminosity). These may require extra packages (e.g. [DarkNews](https://github.com/LBL-Neutrino-Physics/DarkNews-generator)), which are **not** dependencies of MINT |
-| `beam-optics/` | Large development TFS files and derived pickles (not shipped with the package) |
-| `dev_examples/` | Development / extended-study notebooks |
+| `dev_examples/` | How the simulation works — beam optics, detector, rates, accelerator chain |
+| `physics-examples/` | The physics studies behind the paper |
+| `tests/` | The invariants the results depend on (`pytest tests/`) |
+
+## Tests
+
+```bash
+pip install -e ".[dev]"
+pytest tests/
+```
+
+These check the properties the physics leans on: that the beam normalization
+closes including muon survival in the store, that the Courant–Snyder envelopes
+are self-consistent, that the detector column densities are what the rates
+assume, and that the cross-section backends agree.
+
+## Citation
+
+If you use MINT, please cite the accompanying paper. See `physics-examples/` for
+the studies it reports.
 
 ## Building distributions
 
@@ -112,6 +124,6 @@ See `main_collider_ring_studies.ipynb` for the standard validation plots
 python -m build
 ```
 
-Artifacts are placed in `dist/`. The packaged data (cross-section tables and
-the reference lattices in `mint/lattice_data/`) ships inside the wheel, so
-installed users can run flux simulations without cloning the repository.
+Artifacts land in `dist/`. The packaged data — cross-section tables and the
+reference lattices in `mint/lattice_data/` — ships inside the wheel, so an
+installed user can run flux simulations without cloning the repository.
