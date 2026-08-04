@@ -140,6 +140,34 @@ assume, and that the cross-section backends agree.
 
 Matheus Hostert and Joel Choi.
 
+## How this code was written
+
+Parts of this repository were written with the help of an AI assistant (Claude).
+It is worth being clear about which parts, so you know what to trust and what to
+check.
+
+**The physics is ours.** Every scientific decision — what to simulate, which
+approximations are acceptable, the detector designs, the accelerator lattices,
+how to interpret the results, and everything in the accompanying paper — was
+made by the authors. The assistant was not permitted to change physics
+calculations without us approving the change first.
+
+**The assistant did a lot of the engineering.** Restructuring the package,
+writing the test suite and the continuous-integration setup, most of the
+docstrings and the explanatory text in the notebooks, and a fair amount of the
+analysis and plotting code. It also found and fixed real bugs, including a
+cross-section function that silently returned the wrong answer for a mistyped
+neutrino flavor, and a factor-of-21 error in a nuclear density.
+
+**It made mistakes too.** Some were caught by us reading its output, some by the
+tests, and some only by running the notebooks end to end — which is why every
+notebook here is executed from a clean kernel before release rather than shipped
+with old results. Where we know something is approximate or unverified, the code
+and notebooks say so.
+
+If you find something wrong, it is our responsibility, not the tool's. Please
+open an issue.
+
 ## Citation
 
 If you use MINT, please cite the accompanying paper, and the software itself via
