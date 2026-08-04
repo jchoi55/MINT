@@ -144,71 +144,16 @@ class Lattice:
         self.finj = lattice_dict.pop("finj", 1)
 
         # lattice designs
-        self.name = lattice_dict.pop("name", 1)
-        self.short_name = lattice_dict.pop("short_name", 1)
-        self.n_elements = lattice_dict.pop("n_elements", 1)
+        self.name = lattice_dict.pop("name", "unnamed")
+        self.short_name = lattice_dict.pop("short_name", self.name)
+        self.n_elements = lattice_dict.pop("n_elements", None)
 
+        # Any remaining entries (e.g. Twiss interpolants from
+        # create_smoothed_lattice) are stored as attributes.
         for key, value in lattice_dict.items():
-            print("Setting additional", key, "to", value)
-            self.__setattr__(key, value)
-        if lattice_dict.keys():
-            print(
-                "Warning! The following keys were not recognized and will be ignored:",
-                lattice_dict.keys(),
-            )
+            setattr(self, key, value)
 
 
-def create_racetrack_lattice(
-    straight_length=100e2, total_length=300e2, n_elements=10_000, **kwargs
-):
-
-    racetrack_radius = (
-        (total_length - 2 * straight_length) / 2 / np.pi
-    )  # radius of the semicircles
-    n_points = 300
-    # Semicircle on the left
-    theta_left = np.linspace(3 * np.pi / 2, np.pi / 2, n_points)
-    x_left = -straight_length / 2 + racetrack_radius * np.cos(theta_left)
-    y_left = racetrack_radius * np.sin(theta_left)
-
-    # Semicircle on the right
-    theta_right = np.linspace(np.pi / 2, 3 * np.pi / 2, n_points)
-    x_right = straight_length / 2 - racetrack_radius * np.cos(theta_right)
-    y_right = racetrack_radius * np.sin(theta_right)
-
-    # Top straight
-    x_top = np.linspace(-straight_length / 2, straight_length / 2, n_points)
-    y_top = np.full_like(x_top, racetrack_radius)
-
-    # Bottom straight
-    x_bottom = np.linspace(straight_length / 2, -straight_length / 2, n_points)
-    y_bottom = np.full_like(x_bottom, -racetrack_radius)
-
-    # Concatenate all segments. The curve is built in a 2D plane where the first
-    # array is longitudinal (along the straights) and the second is transverse.
-    longitudinal = np.concatenate([x_left, x_top, x_right, x_bottom])
-    transverse = np.concatenate([y_left, y_top, y_right, y_bottom])
-    # Shift so the top straight (the IP straight) sits at transverse = 0; the ring
-    # then extends toward negative transverse.
-    transverse -= np.max(transverse)
-
-    # Map to WORLD coordinates: z = longitudinal (tangential), x = toward the ring
-    # center (+x points to the center, so flip the transverse sign), y = 0 (planar).
-    z_world = longitudinal
-    x_world = -transverse
-    y_world = np.zeros_like(longitudinal)
-
-    lattice_dict = create_lattice_dict_from_vertices(
-        (x_world, y_world, z_world), n_elements=n_elements
-    )
-    # Any additional user-input
-    lattice_dict.update(kwargs)
-
-    lattice = Lattice(**lattice_dict)
-    # vertices in world (x, y, z) order
-    lattice.vertices = (x_world, y_world, z_world)
-
-    return lattice
 
 
 def create_straight_lattice(
@@ -659,176 +604,12 @@ def create_RLA_lattice(
     return lattice
 
 
-def append_lattices(
-    lattice1,
-    lattice2,
-    vert_shift,
-    hor_shift,
-    RLA=False,  # determine if we are adding an RLA lattice (if so, we need to handle which_pass differently)
-    p0_injection=0.255,
-    Nmu_per_bunch_inj=2e12,
-    **kwargs,
-):
-    # Append lattices so they go from one after another in space and time
-
-    # Extract vertex arrays in WORLD (x, y, z) order:
-    #   xw -> transverse (toward center), yw -> vertical (up), zw -> longitudinal.
-    xw = lattice1.vertices[0]
-    yw = lattice1.vertices[1]
-    zw = lattice1.vertices[2] if len(lattice1.vertices) > 2 else np.zeros_like(xw)
-
-    xw2 = lattice2.vertices[0]
-    yw2 = lattice2.vertices[1]
-    zw2 = lattice2.vertices[2] if len(lattice2.vertices) > 2 else np.zeros_like(xw2)
-
-    ds_length1 = get_s_element(xw, yw, zw)
-    s1 = np.concatenate([[0], np.cumsum(ds_length1)])
-    u1 = s1 / s1[-1]
-
-    ds_length2 = get_s_element(xw2, yw2, zw2)
-    s2 = np.concatenate([[0], np.cumsum(ds_length2)])
-    u2 = s2 / s2[-1]
-
-    # Shift second lattice so it follows the first in space. The lattices are
-    # chained along the longitudinal (world z) direction; hor_shift adds an extra
-    # longitudinal gap and vert_shift an extra vertical (world y) offset.
-    xw2_shifted = xw2 + xw[-1]
-    yw2_shifted = yw2 + yw[-1] + vert_shift
-    zw2_shifted = zw2 + zw[-1] + hor_shift
-
-    # Create a single straight transition connecting the end of lattice1 to the
-    # start of the shifted lattice2, interpolated in all three world coordinates.
-    Ntrans = 10_000
-    trans_x = np.linspace(xw[-1], xw2_shifted[0], Ntrans)
-    trans_y = np.linspace(yw[-1], yw2_shifted[0], Ntrans)
-    trans_z = np.linspace(zw[-1], zw2_shifted[0], Ntrans)
-
-    xw = np.concatenate((xw, trans_x, xw2_shifted))
-    yw = np.concatenate((yw, trans_y, yw2_shifted))
-    zw = np.concatenate((zw, trans_z, zw2_shifted))
-
-    dpdx1 = lattice1.dpdx(u1)
-    dpdx2 = lattice2.dpdx(u2)  # still local
-    dpdxtrans = np.full_like(trans_x, 0.0)
-    dpdx = np.concatenate((dpdx1, dpdxtrans, dpdx2))
-
-    # compute ds for transition using 3D segments
-    ds_trans = get_s_element(trans_x, trans_y, trans_z)
-    strans = np.concatenate([[0], np.cumsum(ds_trans)])
-
-    total_length = s1[-1] + strans[-1] + s2[-1]
-    s_total = np.concatenate((s1, strans + s1[-1], s2 + strans[-1] + s1[-1]))
-    u_total = s_total / total_length
-    ds_total = np.concatenate(
-        (ds_length1, np.array([0]), ds_trans, np.array([0]), ds_length2)
-    )
-
-    kwargs["beam_p0"] = interp1d(
-        u_total,
-        np.append([p0_injection], (p0_injection + np.cumsum(dpdx[:-1] * ds_total))),
-    )
-
-    kwargs["dpdx"] = interp1d(u_total, dpdx)
-
-    if RLA == True:
-        # Handle which_pass: offset lattice2's passes so they follow lattice1
-        which_pass_1 = lattice1.which_pass(u1)
-        which_pass_2 = lattice2.which_pass(u2)
-        max_pass_1 = np.max(which_pass_1)
-        which_pass_2_offset = which_pass_2 + max_pass_1
-        which_pass_trans = np.full_like(trans_x, which_pass_1[-1])
-        which_pass_combined = np.concatenate(
-            (which_pass_1, which_pass_trans, which_pass_2_offset)
-        )
-        kwargs["which_pass"] = interp1d(
-            u_total,
-            which_pass_combined,
-            bounds_error=False,
-            kind="nearest",
-            fill_value="extrapolate",
-        )
-    else:
-        # if we are combining a linac and RLA, the pass is 0 for the linac and then RLA's pass number
-        which_pass_2 = lattice2.which_pass(u2)
-        linac_pass = np.full_like(u1, 0)
-        which_pass_trans = np.full_like(trans_x, 0)
-        which_pass_combined = np.concatenate(
-            (linac_pass, which_pass_trans, which_pass_2)
-        )
-        kwargs["which_pass"] = interp1d(
-            u_total,
-            which_pass_combined,
-            bounds_error=False,
-            kind="nearest",
-            fill_value="extrapolate",
-        )
-
-    lattice_dict = create_lattice_dict_from_vertices(
-        (xw, yw, zw), n_elements=len(xw)
-    )
-
-    kwargs["n_elements"] = lattice1.n_elements + lattice2.n_elements
-
-    # Any additional user-input
-    lattice_dict.update(kwargs)
-
-    lattice = Lattice(**lattice_dict)
-    # vertices in world (x, y, z) order: x = transverse (toward center),
-    # y = vertical, z = longitudinal. Vertical shifts (world y) are preserved.
-    lattice.vertices = (xw, yw, zw)
-
-    # combine lattice names
-    lattice.name = lattice1.name + "+" + lattice2.name
-    lattice.short_name = lattice1.short_name + "+" + lattice2.short_name
-
-    # use lattice design parameters from the first lattice
-    lattice.duty_factor = lattice1.duty_factor
-    lattice.bunch_multiplicity = lattice1.bunch_multiplicity
-    lattice.finj = lattice1.finj
-
-    if Nmu_per_bunch_inj == lattice1.Nmu_per_bunch:
-        lattice.Nmu_per_bunch = lattice1.Nmu_per_bunch
-        print("is same; lattice nmu per bunch is:", lattice.Nmu_per_bunch)
-    else:
-        lattice.Nmu_per_bunch = Nmu_per_bunch_inj
-        print("is different; lattice nmu per bunch is:", lattice.Nmu_per_bunch)
-
-    return lattice
 
 
 #     lattice = Lattice(**lattice_dict)
 #     lattice.vertices = (x_racetrack, y_racetrack)
 
 
-def create_elliptical_lattice(
-    length_minor, length_major, center=(0, 0), n_elements=10_000, **kwargs
-):
-    """Create an elliptical lattice.
-
-    Args:
-        length_minor (_type_): _description_
-        length_major (_type_): _description_
-        n_elements (_type_, optional): _description_. Defaults to 10_000.
-    """
-    theta = np.linspace(0, 2 * np.pi, n_elements)
-    # Ellipse drawn in the horizontal plane: major axis -> longitudinal (world z),
-    # minor axis -> transverse (world x), world y = 0 (planar).
-    z_world = center[0] + length_major * np.cos(theta)
-    x_world = center[1] + length_minor * np.sin(theta)
-    y_world = np.zeros_like(z_world)
-
-    lattice_dict = create_lattice_dict_from_vertices(
-        (x_world, y_world, z_world), n_elements=n_elements
-    )
-
-    # Any additional user-input
-    lattice_dict.update(kwargs)
-
-    lattice = Lattice(**lattice_dict)
-    # vertices in world (x, y, z) order
-    lattice.vertices = (x_world, y_world, z_world)
-
-    return lattice
 
 
 def get_gyro_radius(E, B):
@@ -863,11 +644,6 @@ def advance_in_pos_and_momentum(x0, y0, px0, py0, dtheta, ds):
         return x0 + dx, y0 + dy, pxf, pyf
 
 
-def advance_in_pos(x0, y0, theta_0, dtheta, ds):
-    theta_mid = theta_0 + dtheta / 2
-    x_new = x0 + ds * np.cos(theta_mid)
-    y_new = y0 + ds * np.sin(theta_mid)
-    return x_new, y_new
 
 
 def create_lattice_dict_from_vertices(vertices, n_elements=None):
@@ -960,52 +736,6 @@ def create_lattice_dict_from_vertices(vertices, n_elements=None):
     return lattice_dict
 
 
-def concatenate_lattice_dfs(df1, df2, x_shift=None, y_shift=None):
-    """Concatenate two lattice dataframes by shifting the x values of the second dataframe.
-
-
-    Parameters
-    ----------
-    df1 : pd.DataFrame
-        The first lattice dataframe.
-    df2 : pd.DataFrame
-        The second lattice dataframe to be shifted and concatenated.
-    x_shift : float, optional
-        The amount to shift the x values of df2. If None, uses the max x value from df1.
-    y_shift : float, optional
-        The amount to shift the y values of df2. If None, uses the max y value from df1.
-
-    NOTE: the attrs of df1 are preserved; attrs of df2 are discarded.
-
-    Returns
-    -------
-    pd.DataFrame
-        The concatenated lattice dataframe.
-    """
-
-    # Concatenate the two dataframes with shifted x values
-    df1 = df1.copy()
-    df2 = df2.copy()
-
-    # Get the max x value from the straight lattice to use for shifting
-    if x_shift is None:
-        x_shift = df1["x"].max()
-    if y_shift is None:
-        y_shift = df1["y"].max()
-
-    # Shift x, y, and S values
-    df2["x"] = df2["x"] + x_shift
-    df2["y"] = df2["y"] + y_shift
-    # Shift S coordinate to continue from where df1 ended
-    s_shift = df1["S"].max()
-    df2["S"] = df2["S"] + s_shift
-
-    # Concatenate the dataframes
-    df_combined = pd.concat([df1, df2], ignore_index=True)
-    df_combined.attrs = df1.attrs
-
-    del df1, df2
-    return df_combined
 
 
 def get_lattice_dataframe_from_tfs(filename):
@@ -1064,33 +794,42 @@ def get_lattice_dataframe_from_tfs(filename):
     # Assign metadata to the DataFrame's attributes
     df.attrs = metadata
 
-    # Put the initial conditions for the particle momentum
-    df.loc[0, "px"] = float(df.attrs["ENERGY"])
+    # Propagate the survey geometry through the elements (vectorized version of
+    # chaining advance_in_pos_and_momentum element by element).
+    #
+    # The direction angle entering element i is theta_in[i] = -sum of all
+    # upstream bending kicks (the initial momentum points along +x). Zero-length
+    # elements apply no kick and no displacement (matching the element-by-element
+    # propagation, which skips L == 0 rows entirely). Each element then advances
+    # the position by its exact chord:
+    #     straight (kick = 0): (L cos(theta_in), L sin(theta_in))
+    #     bend: R * (sin(theta_in) - sin(theta_in - kick),
+    #                cos(theta_in - kick) - cos(theta_in)),  R = L / kick
+    p0 = float(df.attrs["ENERGY"])
+    L = df["L"].to_numpy(dtype=float)
+    kick = np.where(L != 0.0, df["ANGLE"].to_numpy(dtype=float), 0.0)
 
-    # for i in range(0, n_elements):
-    for i in range(0, n_elements - 1):
-        if df["L"][i] == 0:
-            (
-                df.loc[i + 1, "x"],
-                df.loc[i + 1, "y"],
-                df.loc[i + 1, "px"],
-                df.loc[i + 1, "py"],
-            ) = (df["x"][i], df["y"][i], df["px"][i], df["py"][i])
-            continue
-        else:
-            (
-                df.loc[i + 1, "x"],
-                df.loc[i + 1, "y"],
-                df.loc[i + 1, "px"],
-                df.loc[i + 1, "py"],
-            ) = advance_in_pos_and_momentum(
-                df["x"][i],
-                df["y"][i],
-                df["px"][i],
-                df["py"][i],
-                dtheta=df["ANGLE"][i],
-                ds=df["L"][i],
-            )
+    theta_in = np.concatenate([[0.0], -np.cumsum(kick)[:-1]])
+    theta_out = theta_in - kick
+
+    with np.errstate(divide="ignore", invalid="ignore"):
+        R = np.where(kick != 0.0, L / np.where(kick != 0.0, kick, 1.0), 0.0)
+    dx = np.where(
+        kick == 0.0,
+        L * np.cos(theta_in),
+        R * (np.sin(theta_in) - np.sin(theta_out)),
+    )
+    dy = np.where(
+        kick == 0.0,
+        L * np.sin(theta_in),
+        R * (np.cos(theta_out) - np.cos(theta_in)),
+    )
+
+    # Positions at the START of each element; momenta (|p| = p0 is conserved).
+    df["x"] = np.concatenate([[0.0], np.cumsum(dx[:-1])])
+    df["y"] = np.concatenate([[0.0], np.cumsum(dy[:-1])])
+    df["px"] = p0 * np.cos(theta_in)
+    df["py"] = p0 * np.sin(theta_in)
 
     return df
 
@@ -1196,3 +935,525 @@ def plot_lattice(df):
         dpi=500,
         bbox_inches="tight",
     )
+
+# ==========================================================================
+# Smoothed-lattice construction (moved here from the former
+# mint/beam_optics.py, whose other contents were byte-identical copies of
+# get_gyro_radius / get_dtheta / advance_in_pos_and_momentum above, a
+# second plot_lattice, and a dead truncated variant).
+# ==========================================================================
+
+def _unwrap_phase(phi: np.ndarray) -> np.ndarray:
+    """Unwrap a phase-like quantity in turns or radians (MAD-X mux/muy are typically in turns)."""
+    # np.unwrap assumes radians; if mux is in "turns" you can unwrap in turns by scaling.
+    # But linear interpolation of mux is only used if you want it; here we keep it robust:
+    # treat as turns -> convert to radians, unwrap, then back.
+    phi = np.asarray(phi, dtype=float)
+    phi_rad = 2.0 * np.pi * phi
+    phi_unw = np.unwrap(phi_rad)
+    return phi_unw / (2.0 * np.pi)
+
+
+def create_smoothed_lattice(
+    twiss_df: pd.DataFrame,
+    emittance_RMS: float,
+    n_elements: int = 120_000,
+    rotated: bool = False,
+    if_sublattice: bool = False,
+    midpoint: bool = True,
+    include_dispersion: bool = True,
+    sigma_delta: float | None = None,
+    # geometry inputs (if you already have them in the df, set these column names)
+    x_col: str = "x",
+    y_col: str = "y",
+    px_col: str = "px",
+    py_col: str = "py",
+    angle_col: str = "ANGLE",
+    # If your df has ALFX/ALFY; if not, we’ll infer gamma from GAMMAX/GAMMAY if provided
+    use_alpha: bool = True,
+    # constants container you use in your codebase
+    **kwargs,
+):
+    """
+    Smoothed lattice (Twiss->gamma->beam envelopes + optional dispersion+sigma_delta),
+    returning the legacy interface: interp1d callables in a lattice_dict.
+
+    Key change vs the previous version:
+      *Geometry (x,y,angle_of_central_p) is obtained by integrating through elements* by
+      splitting each element's total bending kick into many tiny sub-kicks.
+
+    Returns at least:
+      x,y,s,angle_of_central_p,beamsize_x,beamsize_y,beamdiv_x,beamdiv_y,
+      dispersion_Dx,dispersion_Dpx,inv_s,beam_p0
+    plus useful extras for MC sampling (covariances, twiss, etc.) as interpolants.
+    """
+
+    df = twiss_df.copy()
+
+    # ---- Required optics columns
+    required = ["S", "L", "BETX", "BETY"]
+    for c in required:
+        if c not in df.columns:
+            raise ValueError(f"TWISS table missing required column '{c}'")
+
+    # ALFX/ALFY are needed if you want covariances and to compute gamma from Twiss.
+    # If missing, we can fall back to GAMMAX/GAMMAY if present.
+    have_alpha = ("ALFX" in df.columns) and ("ALFY" in df.columns)
+    have_gamma = ("GAMMAX" in df.columns) and ("GAMMAY" in df.columns)
+
+    if use_alpha and not have_alpha and not have_gamma:
+        raise ValueError(
+            "Need ALFX/ALFY or GAMMAX/GAMMAY columns to compute divergences (gamma)."
+        )
+
+    # ---- Optional geometry columns
+    have_xy = (x_col in df.columns) and (y_col in df.columns)
+    have_p = (px_col in df.columns) and (py_col in df.columns)
+    have_kick = angle_col in df.columns
+
+    # Sort by S
+    s = np.asarray(df["S"], dtype=float)
+    Lcol = np.asarray(df["L"], dtype=float)
+    order = np.argsort(s)
+    df = df.iloc[order].reset_index(drop=True)
+    s = s[order]
+    Lcol = Lcol[order]
+
+    # Element edge positions if midpoint is true
+    if midpoint:
+        s_end = s + 0.5 * Lcol
+    else:
+        s_end = s
+
+    C = float(np.max(s_end))
+    if C <= 0:
+        raise ValueError("Could not infer positive circumference from TWISS data.")
+
+    # Periodic interpolation knots helper (for optics fields)
+    def periodic_knots(arr: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        ss = np.mod(s, C)
+        idx = np.argsort(ss)
+        ss = ss[idx]
+        xx = np.asarray(arr, dtype=float)[idx]
+        ss_ext = np.concatenate([ss - C, ss, ss + C])
+        xx_ext = np.concatenate([xx, xx, xx])
+        return ss_ext, xx_ext
+
+    # Uniform grid in meters for physics; later convert to cm for output interpolants
+    n_elements = int(n_elements)
+    if n_elements <= 10:
+        raise ValueError(
+            "n_elements must be reasonably large (>10) for a smooth lattice."
+        )
+
+    s_grid_m = np.linspace(0.0, C, n_elements, endpoint=False)
+
+    def interp_on_grid(arr: np.ndarray) -> np.ndarray:
+        ss_ext, xx_ext = periodic_knots(arr)
+        return np.interp(s_grid_m, ss_ext, xx_ext)
+
+    # ---- Optics fields
+    #
+    # Interpolating the raw Twiss functions between sparse points is delicate near a
+    # low-beta IP, where beta is parabolic, beta(s) = beta* + s^2/beta*, and plunges
+    # by orders of magnitude between two tabulated points:
+    #   * gamma is the phase-space INVARIANT -- constant in a field-free drift -- so it
+    #     interpolates safely and is what we use for the DIVERGENCE, sqrt(eps*gamma).
+    #     (Deriving gamma = (1+alpha^2)/beta from a linearly interpolated beta instead
+    #     makes the divergence ~8x too low at the IP.)
+    #   * beta (the BEAM SIZE) must respect its local parabola. We model beta inside
+    #     each Twiss segment by its exact local form beta(d) = beta0 - 2 alpha0 d +
+    #     gamma0 d^2 (minimum 1/gamma0 > 0, so always POSITIVE), and blend the left and
+    #     right segment parabolas. This is exact in drifts, matches the Twiss table at
+    #     every point, and -- unlike reconstructing beta = (1+alpha^2)/gamma from
+    #     independently interpolated alpha, gamma -- does not produce spurious dips at
+    #     alpha zero-crossings in the arcs.
+    if have_alpha:
+        # alpha interpolates cleanly (linear in drifts, smooth in arcs); used for the
+        # x-x' covariance and for the beta segment-parabola blend.
+        alfx = interp_on_grid(df["ALFX"].to_numpy(dtype=float))
+        alfy = interp_on_grid(df["ALFY"].to_numpy(dtype=float))
+    else:
+        alfx = None
+        alfy = None
+
+    if have_gamma:
+        gamx = interp_on_grid(df["GAMMAX"].to_numpy(dtype=float))
+        gamy = interp_on_grid(df["GAMMAY"].to_numpy(dtype=float))
+    else:
+        # No gamma column: derive it (interpolating beta is imperfect in low-beta
+        # drifts, but it is the best available without the invariant gamma).
+        gamx = (1.0 + alfx**2) / interp_on_grid(df["BETX"].to_numpy(dtype=float))
+        gamy = (1.0 + alfy**2) / interp_on_grid(df["BETY"].to_numpy(dtype=float))
+
+    def beta_twiss_on_grid(beta_col: str, alpha_col: str) -> np.ndarray:
+        """Interpolate beta(s) onto s_grid_m using the local Twiss parabola in each
+        segment: beta(d) = beta0 - 2 alpha0 d + gamma0 d^2. Positive by construction,
+        exact in drifts, and dip-free at alpha zero-crossings."""
+        bt = df[beta_col].to_numpy(dtype=float)
+        at = df[alpha_col].to_numpy(dtype=float)
+        ss = np.mod(s, C)
+        order = np.argsort(ss)
+        ss, bt, at = ss[order], bt[order], at[order]
+        keep = np.concatenate([[True], np.diff(ss) > 0])  # drop duplicate s
+        ss, bt, at = ss[keep], bt[keep], at[keep]
+        gt = (1.0 + at**2) / bt
+        # periodic wrap so grid points near 0 and C are bracketed
+        ss_ext = np.concatenate([[ss[-1] - C], ss, [ss[0] + C]])
+        bt_ext = np.concatenate([[bt[-1]], bt, [bt[0]]])
+        at_ext = np.concatenate([[at[-1]], at, [at[0]]])
+        gt_ext = np.concatenate([[gt[-1]], gt, [gt[0]]])
+        j = np.clip(np.searchsorted(ss_ext, s_grid_m) - 1, 0, len(ss_ext) - 2)
+        sL, sR = ss_ext[j], ss_ext[j + 1]
+        dL, dR = s_grid_m - sL, s_grid_m - sR
+        beta_L = bt_ext[j] - 2.0 * at_ext[j] * dL + gt_ext[j] * dL**2
+        beta_R = bt_ext[j + 1] - 2.0 * at_ext[j + 1] * dR + gt_ext[j + 1] * dR**2
+        t = (s_grid_m - sL) / (sR - sL)
+        return (1.0 - t) * beta_L + t * beta_R
+
+    if have_alpha:
+        betx = beta_twiss_on_grid("BETX", "ALFX")
+        bety = beta_twiss_on_grid("BETY", "ALFY")
+    else:
+        betx = interp_on_grid(df["BETX"].to_numpy(dtype=float))
+        bety = interp_on_grid(df["BETY"].to_numpy(dtype=float))
+
+    # Optional phase advances (not required, but useful sometimes)
+    mux = (
+        _unwrap_phase(df["MUX"].to_numpy(dtype=float)) if "MUX" in df.columns else None
+    )
+    muy = (
+        _unwrap_phase(df["MUY"].to_numpy(dtype=float)) if "MUY" in df.columns else None
+    )
+    if mux is not None:
+        mux = interp_on_grid(mux)
+    if muy is not None:
+        muy = interp_on_grid(muy)
+
+    # ---- Dispersion
+    if include_dispersion:
+        Dx = (
+            interp_on_grid(df["DX"].to_numpy(dtype=float))
+            if "DX" in df.columns
+            else np.zeros_like(s_grid_m)
+        )
+        Dpx = (
+            interp_on_grid(df["DPX"].to_numpy(dtype=float))
+            if "DPX" in df.columns
+            else np.zeros_like(s_grid_m)
+        )
+    else:
+        Dx = np.zeros_like(s_grid_m)
+        Dpx = np.zeros_like(s_grid_m)
+
+    # ---- Beam envelopes
+    eps = float(emittance_RMS)
+    sigx = np.sqrt(np.maximum(0.0, eps * betx))
+    sigxp = np.sqrt(np.maximum(0.0, eps * gamx))
+    sigy = np.sqrt(np.maximum(0.0, eps * bety))
+    sigyp = np.sqrt(np.maximum(0.0, eps * gamy))
+
+    # Correlations: cov(x,x') = -eps*alpha
+    if have_alpha:
+        cov_x_xp = -eps * alfx
+        cov_y_yp = -eps * alfy
+    else:
+        cov_x_xp = np.zeros_like(s_grid_m)
+        cov_y_yp = np.zeros_like(s_grid_m)
+
+    # Include dispersion contribution if sigma_delta is provided (position+angle RMS)
+    if include_dispersion and (sigma_delta is not None):
+        sd = float(sigma_delta)
+        sigx_tot = np.sqrt(sigx**2 + (Dx * sd) ** 2)
+        sigxp_tot = np.sqrt(sigxp**2 + (Dpx * sd) ** 2)
+    else:
+        sigx_tot, sigxp_tot = sigx, sigxp
+
+    # ---- Geometry via element subdivision integration
+    # This is the key change: we do NOT linearly interpolate sparse (x,y) points.
+
+    def _integrate_geometry() -> tuple[np.ndarray, np.ndarray, np.ndarray] | None:
+        """Integrate x(s), y(s), theta(s) by splitting each element's total kick into sub-kicks.
+
+        Requires x,y and ANGLE (kick). Initial direction comes from px,py if present; otherwise
+        it is estimated from the first two geometry points.
+        """
+
+        if not (have_xy and have_kick):
+            return None
+
+        # Initial position
+        x0 = float(df.iloc[0][x_col])
+        y0 = float(df.iloc[0][y_col])
+
+        # Initial direction (unit vector)
+        if have_p:
+            px0 = float(df.iloc[0][px_col])
+            py0 = float(df.iloc[0][py_col])
+            pnorm = float(np.hypot(px0, py0))
+            if np.isfinite(pnorm) and pnorm > 0.0:
+                px0, py0 = px0 / pnorm, py0 / pnorm
+            else:
+                px0, py0 = 1.0, 0.0
+        else:
+            # estimate from next available geometry point
+            if len(df) > 1:
+                dx0 = float(df.iloc[1][x_col]) - x0
+                dy0 = float(df.iloc[1][y_col]) - y0
+                th0 = float(np.arctan2(dy0, dx0))
+            else:
+                th0 = 0.0
+            px0, py0 = float(np.cos(th0)), float(np.sin(th0))
+
+        # Target step size (meters)
+        ds_target = C / n_elements
+
+        xs = [x0]
+        ys = [y0]
+        ss = [0.0]
+        ths = [float(np.arctan2(py0, px0))]
+
+        x, y, px, py = x0, y0, px0, py0
+        s_acc = 0.0
+
+        for i in range(len(df)):
+            ell = float(df.iloc[i]["L"])
+            if (not np.isfinite(ell)) or ell <= 0.0:
+                continue
+
+            dtheta = float(df.iloc[i][angle_col])
+            if not np.isfinite(dtheta):
+                dtheta = 0.0
+
+            n_sub = int(np.ceil(ell / max(ds_target, 1e-12)))
+            n_sub = max(n_sub, 1)
+            ds_sub = ell / n_sub
+            dth_sub = dtheta / n_sub
+
+            for _ in range(n_sub):
+                x, y, px, py = advance_in_pos_and_momentum(
+                    x, y, px, py, dth_sub, ds_sub
+                )
+                s_acc += ds_sub
+                xs.append(x)
+                ys.append(y)
+                ss.append(s_acc)
+                ths.append(float(np.arctan2(py, px)))
+
+        xs = np.asarray(xs, dtype=float)
+        ys = np.asarray(ys, dtype=float)
+        ss = np.asarray(ss, dtype=float)
+        ths = np.asarray(ths, dtype=float)
+
+        if len(ss) < 2 or ss[-1] <= 0.0:
+            return None
+
+        # Small mismatch between sum(L) and inferred C can happen; normalize to C.
+        ss *= C / ss[-1]
+
+        # Periodic endpoint to allow interpolation at/near C.
+        # We force closure by repeating the first point at s=C.
+        xs = np.concatenate([xs, xs[:1]])
+        ys = np.concatenate([ys, ys[:1]])
+        ss = np.concatenate([ss, np.array([C])])
+
+        # Unwrap theta to avoid jumps during interpolation
+        th_unw = np.unwrap(ths)
+        # Append a consistent endpoint for theta; the value at C should match 0-turn closure
+        th_unw = np.concatenate([th_unw, th_unw[:1] + (th_unw[-1] - th_unw[0])])
+
+        x_m = np.interp(s_grid_m, ss, xs)
+        y_m = np.interp(s_grid_m, ss, ys)
+        theta_m = np.interp(s_grid_m, ss, th_unw)
+
+        # Wrap back to [-pi, pi)
+        theta_m = (theta_m + np.pi) % (2.0 * np.pi) - np.pi
+
+        return x_m, y_m, theta_m
+
+    geom = _integrate_geometry()
+
+    if geom is None:
+        # Fallback: interpolate sparse geometry if we cannot integrate
+        if have_xy:
+            x_m = interp_on_grid(df[x_col].to_numpy(dtype=float))
+            y_m = interp_on_grid(df[y_col].to_numpy(dtype=float))
+        else:
+            x_m = np.zeros_like(s_grid_m)
+            y_m = np.zeros_like(s_grid_m)
+
+        if have_p:
+            px = interp_on_grid(df[px_col].to_numpy(dtype=float))
+            py = interp_on_grid(df[py_col].to_numpy(dtype=float))
+            angle = np.arctan2(py, px)
+        else:
+            # last resort: tangent from geometry
+            dxf = np.gradient(x_m, s_grid_m)
+            dyf = np.gradient(y_m, s_grid_m)
+            angle = np.arctan2(dyf, dxf)
+    else:
+        x_m, y_m, angle = geom
+
+    # Rotation/centering if requested
+    if rotated:
+        mid = len(s_grid_m) // 2
+        x0, y0 = x_m[mid], y_m[mid]
+
+        # Use a wider window for robust tangent estimation
+        k = 500
+        i0 = max(0, mid - k)
+        i1 = min(len(x_m) - 1, mid + k)
+
+        dx = x_m[i1] - x_m[i0]
+        dy = y_m[i1] - y_m[i0]
+        theta_tan = float(np.arctan2(dy, dx))
+
+        ca, sa = np.cos(-theta_tan), np.sin(-theta_tan)
+        xr = (x_m - x0) * ca - (y_m - y0) * sa
+        yr = (x_m - x0) * sa + (y_m - y0) * ca
+        x_m, y_m = xr, yr
+
+        # Keep angle consistent with rotated geometry
+        angle = angle - theta_tan
+        angle = (angle + np.pi) % (2.0 * np.pi) - np.pi
+
+        # Optional: force the direction at the center to point along +x (not -x)
+        if np.mean(np.diff(x_m[mid - 500 : mid + 500])) < 0:
+            x_m *= -1
+            angle = np.arctan2(np.gradient(y_m, s_grid_m), np.gradient(x_m, s_grid_m))
+
+    # NOTE: if_sublattice closure is geometry-specific and is not implemented here.
+    # Keep the flag for interface compatibility.
+    _ = if_sublattice
+
+    # ---- Map the integrated (drawing-plane) geometry to WORLD coordinates.
+    # The MAD-X survey geometry lives in a horizontal plane: x_m is the
+    # longitudinal coordinate (along the beam) and y_m the transverse one, with
+    # `angle` the tangent angle measured from x_m toward y_m. In world axes:
+    #   z (tangential) = x_m,  x (toward center) = s_transverse * y_m,  y (up) = 0.
+    # Choose the transverse sign so the ring bulges toward +x (center at +x).
+    s_transverse = 1.0 if float(np.mean(y_m)) >= 0.0 else -1.0
+
+    z_world_m = x_m
+    x_world_m = s_transverse * y_m
+    # World tangent components (unit): tz = cos(angle), tx = s * sin(angle), ty = 0.
+    tx_world = s_transverse * np.sin(angle)
+    ty_world = np.zeros_like(angle)
+    tz_world = np.cos(angle)
+    # World tangent angle in the horizontal z-x plane, from +z toward +x.
+    angle_world = np.arctan2(tx_world, tz_world)
+
+    s_cm = s_grid_m * const.m_to_cm
+    x_cm = x_world_m * const.m_to_cm
+    y_cm = np.zeros_like(x_cm)
+    z_cm = z_world_m * const.m_to_cm
+
+    beamsize_x_cm = sigx_tot * const.m_to_cm
+    beamsize_y_cm = sigy * const.m_to_cm
+
+    # beamdiv in the old interface is an angle in rad.
+    beamdiv_x = np.arctan(sigxp_tot)
+    beamdiv_y = np.arctan(sigyp)
+
+    # ---- Build interpolation objects
+    lattice_dict: dict[str, object] = {}
+    u = np.linspace(0.0, 1.0, len(s_cm))
+
+    lattice_dict["x"] = interp1d(u, x_cm, bounds_error=False, fill_value=None)
+    lattice_dict["y"] = interp1d(u, y_cm, bounds_error=False, fill_value=None)
+    lattice_dict["z"] = interp1d(u, z_cm, bounds_error=False, fill_value=None)
+    lattice_dict["s"] = interp1d(u, s_cm, bounds_error=False, fill_value=None)
+
+    lattice_dict["angle_of_central_p"] = interp1d(
+        u, angle_world, bounds_error=False, fill_value=None
+    )
+
+    # World unit tangent [tx, ty, tz] of the central orbit.
+    _tx_i = interp1d(u, tx_world, bounds_error=False, fill_value=None)
+    _ty_i = interp1d(u, ty_world, bounds_error=False, fill_value=None)
+    _tz_i = interp1d(u, tz_world, bounds_error=False, fill_value=None)
+    lattice_dict["tangent"] = lambda uu, _tx_i=_tx_i, _ty_i=_ty_i, _tz_i=_tz_i: np.vstack(
+        [_tx_i(uu), _ty_i(uu), _tz_i(uu)]
+    )
+
+    lattice_dict["beamsize_x"] = interp1d(
+        u, beamsize_x_cm, bounds_error=False, fill_value=None
+    )
+    lattice_dict["beamsize_y"] = interp1d(
+        u, beamsize_y_cm, bounds_error=False, fill_value=None
+    )
+
+    lattice_dict["beamdiv_x"] = interp1d(
+        u, beamdiv_x, bounds_error=False, fill_value=None
+    )
+    lattice_dict["beamdiv_y"] = interp1d(
+        u, beamdiv_y, bounds_error=False, fill_value=None
+    )
+
+    lattice_dict["dispersion_Dx"] = interp1d(u, Dx, bounds_error=False, fill_value=None)
+    lattice_dict["dispersion_Dpx"] = interp1d(
+        u, Dpx, bounds_error=False, fill_value=None
+    )
+
+    lattice_dict["inv_s"] = interp1d(s_cm, u, bounds_error=False, fill_value=None)
+
+    # ---- Beam momentum
+    lattice_dict["beam_p0"] = np.sqrt(float(df.attrs["ENERGY"]) ** 2 - const.m_mu**2)
+
+    # ---- Extras for MC beam sampling (also interpolants)
+    lattice_dict["betx"] = interp1d(u, betx, bounds_error=False, fill_value=None)
+    lattice_dict["bety"] = interp1d(u, bety, bounds_error=False, fill_value=None)
+    lattice_dict["gamx"] = interp1d(u, gamx, bounds_error=False, fill_value=None)
+    lattice_dict["gamy"] = interp1d(u, gamy, bounds_error=False, fill_value=None)
+
+    if have_alpha:
+        lattice_dict["alfx"] = interp1d(u, alfx, bounds_error=False, fill_value=None)
+        lattice_dict["alfy"] = interp1d(u, alfy, bounds_error=False, fill_value=None)
+
+    lattice_dict["cov_x_xp"] = interp1d(
+        u, cov_x_xp, bounds_error=False, fill_value=None
+    )
+    lattice_dict["cov_y_yp"] = interp1d(
+        u, cov_y_yp, bounds_error=False, fill_value=None
+    )
+
+    lattice_dict["sigma_xp"] = interp1d(
+        u, sigxp_tot, bounds_error=False, fill_value=None
+    )
+    lattice_dict["sigma_yp"] = interp1d(u, sigyp, bounds_error=False, fill_value=None)
+
+    lattice_dict["length_cm"] = float(C * const.m_to_cm)
+    lattice_dict["length_m"] = float(C)
+    lattice_dict["emittance_RMS"] = float(eps)
+    lattice_dict["midpoint"] = bool(midpoint)
+    lattice_dict["include_dispersion"] = bool(include_dispersion)
+    lattice_dict["sigma_delta"] = None if sigma_delta is None else float(sigma_delta)
+
+    if mux is not None:
+        lattice_dict["mux"] = interp1d(u, mux, bounds_error=False, fill_value=None)
+    if muy is not None:
+        lattice_dict["muy"] = interp1d(u, muy, bounds_error=False, fill_value=None)
+
+    # user extras
+    lattice_dict.update(kwargs)
+
+    # ---- Contract check (fail fast if something regresses)
+    REQUIRED = {
+        "x",
+        "y",
+        "s",
+        "angle_of_central_p",
+        "beamsize_x",
+        "beamsize_y",
+        "beamdiv_x",
+        "beamdiv_y",
+        "dispersion_Dx",
+        "dispersion_Dpx",
+        "inv_s",
+        "beam_p0",
+    }
+    missing = REQUIRED - set(lattice_dict.keys())
+    if missing:
+        raise RuntimeError(f"Missing required lattice keys: {sorted(missing)}")
+
+    return lattice_dict

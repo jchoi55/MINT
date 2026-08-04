@@ -18,32 +18,6 @@ nuf_dict = {
 }
 
 
-# """Returns necessary cross neutrino cross sections from xsecs"""
-# log10E, sigmaeo, sigmamuo, _, sigmaebaro, sigmamubaro, _ = np.genfromtxt(
-#     files("mint.xsec_data").joinpath("XCC.dat").open(), unpack=True
-# )
-# exs = 10 ** (log10E)
-# exs = np.append(exs, 1e4)
-
-# # adding values linearily up to 10 TeV
-# sigmae = np.append(sigmaeo, 7.046434082801659e-1)
-# sigmamu = np.append(sigmamuo, 7.046434082801659e-1)
-# sigmaebar = np.append(sigmaebaro, 3.758631195493489e-1)
-# sigmamubar = np.append(sigmamubaro, 3.758631195493489e-1)
-
-# # generating interpolators
-# total_sigmanue = interp1d(exs, sigmae * exs * 1e-38, bounds_error=False, fill_value=0.0)
-# total_sigmanuebar = interp1d(
-#     exs, sigmaebar * exs * 1e-38, bounds_error=False, fill_value=0.0
-# )
-# total_sigmanumu = interp1d(
-#     exs, sigmamu * exs * 1e-38, bounds_error=False, fill_value=0.0
-# )
-# total_sigmanumubar = interp1d(
-#     exs, sigmamubar * exs * 1e-38, bounds_error=False, fill_value=0.0
-# )
-
-
 """
     Neutrino-electron elastic scattering functions
 
@@ -52,7 +26,7 @@ nuf_dict = {
 """
 
 
-def nue_elastic_sigma(Enu, nuf, s2w=0.2334, m=const.m_e, Te_min=0, Te_max=np.inf):
+def nue_elastic_sigma(Enu, nuf, s2w=const.s2w, m=const.m_e, Te_min=0, Te_max=np.inf):
     """
     Calculate the total cross section ignoring terms proportional to alpha_EM.
 
@@ -80,7 +54,7 @@ def nue_elastic_sigma(Enu, nuf, s2w=0.2334, m=const.m_e, Te_min=0, Te_max=np.inf
     C_LL = C_LL_dic[nuf_dict[nuf]]
     C_LR = s2w
 
-    s = 2 * m * Enu  # + m**2
+    s = 2 * m * Enu + m**2  # consistent with nue_elastic_dsigma_dy
     prefactor = const.Gf**2 * s / np.pi
 
     y_max = np.minimum(2 * Enu / (2 * Enu + m), Te_max / Enu)
@@ -92,7 +66,8 @@ def nue_elastic_sigma(Enu, nuf, s2w=0.2334, m=const.m_e, Te_min=0, Te_max=np.inf
         term2 = (C_LL**2) * (
             y_range - (y_max**2 - y_min**2) + (y_max**3 - y_min**3) / 3
         )
-        term3 = (-C_LL * C_LR * m / (2 * Enu)) * y_range**2
+        # integral of the linear-in-y interference term: (y_max^2 - y_min^2)/2
+        term3 = (-C_LL * C_LR * m / (2 * Enu)) * (y_max**2 - y_min**2)
         sigma = prefactor * (term1 + term2 + term3)
 
     else:
@@ -106,7 +81,7 @@ def nue_elastic_sigma(Enu, nuf, s2w=0.2334, m=const.m_e, Te_min=0, Te_max=np.inf
     return sigma * const.invGeV2_to_cm2
 
 
-def nue_elastic_dsigma_dy(y, Enu, nuf, s2w=0.2334, m=const.m_e):
+def nue_elastic_dsigma_dy(y, Enu, nuf, s2w=const.s2w, m=const.m_e):
     """
     Calculate the differential cross section ignoring terms proportional to alpha_EM.
 
@@ -205,33 +180,64 @@ data_n = np.genfromtxt(
 ).T
 Enu_data = data_p[0]
 
-sigma_lightquark_CC_nu = interp1d(
+_alf_sigma_lightquark_CC_nu = interp1d(
     Enu_data, (data_n[1] + data_p[1]) / 2 * 1e-36, **kwargs_interp
 )
-sigma_lightquark_CC_nubar = interp1d(
+_alf_sigma_lightquark_CC_nubar = interp1d(
     data_p[0], (data_n[6] + data_p[6]) / 2 * 1e-36, **kwargs_interp
 )
-sigma_charm_CC_nu = interp1d(
+_alf_sigma_charm_CC_nu = interp1d(
     Enu_data,
     (data_n[1] * data_n[3] + data_p[1] * data_p[3]) / 2 * 1e-36,
     **kwargs_interp,
 )
-sigma_charm_CC_nubar = interp1d(
+_alf_sigma_charm_CC_nubar = interp1d(
     Enu_data,
     (data_n[6] * data_n[8] + data_p[6] * data_p[8]) / 2 * 1e-36,
     **kwargs_interp,
 )
 
-sigma_bottom_CC_nu = interp1d(
+_alf_sigma_bottom_CC_nu = interp1d(
     Enu_data,
     (data_n[1] * data_n[4] + data_p[1] * data_p[4]) / 2 * 1e-36,
     **kwargs_interp,
 )
-sigma_bottom_CC_nubar = interp1d(
+_alf_sigma_bottom_CC_nubar = interp1d(
     Enu_data,
     (data_n[6] * data_n[9] + data_p[6] * data_p[9]) / 2 * 1e-36,
     **kwargs_interp,
 )
+
+# Total CC per proton / per neutron (light+charm+bottom are all contained in
+# the tabulated totals), for non-isoscalar target corrections.
+_alf_sigma_CC_p_nu = interp1d(Enu_data, data_p[1] * 1e-36, **kwargs_interp)
+_alf_sigma_CC_n_nu = interp1d(Enu_data, data_n[1] * 1e-36, **kwargs_interp)
+_alf_sigma_CC_p_nubar = interp1d(Enu_data, data_p[6] * 1e-36, **kwargs_interp)
+_alf_sigma_CC_n_nubar = interp1d(Enu_data, data_n[6] * 1e-36, **kwargs_interp)
+
+
+def cc_nonisoscalar_correction(Enu, nuflavor, Z, A):
+    """Multiplicative correction to the ISOSCALAR per-nucleon CC cross section
+    for a target with Z protons and A-Z neutrons:
+
+        [Z sigma_p + (A-Z) sigma_n] / A  /  [(sigma_p + sigma_n)/2].
+
+    Uses the NNLO proton/neutron split of the shipped tables; as a RATIO it is
+    backend-independent to good accuracy, so it can multiply either backend's
+    isoscalar sigma. Neutron-rich targets enhance nu CC (more d quarks) and
+    suppress nubar CC: for tungsten (Z/A = 0.402) the correction is +5-6% (nu)
+    and -(4-5)% (nubar) at 0.1-5 TeV. NC non-isoscalar corrections are smaller
+    (weaker d/u coupling asymmetry) and are neglected.
+    """
+    Enu = np.asarray(Enu, float)
+    if "bar" in nuflavor:
+        sp, sn = _alf_sigma_CC_p_nubar(Enu), _alf_sigma_CC_n_nubar(Enu)
+    else:
+        sp, sn = _alf_sigma_CC_p_nu(Enu), _alf_sigma_CC_n_nu(Enu)
+    iso = 0.5 * (sp + sn)
+    frac_p = Z / A
+    return np.where(iso > 0, (frac_p * sp + (1 - frac_p) * sn) / np.where(iso > 0, iso, 1.0), 1.0)
+
 
 # NOTE: Top quark threshold > 10 TeV
 # sigma_top_CC_nu = interp1d(
@@ -246,13 +252,127 @@ sigma_bottom_CC_nubar = interp1d(
 # )
 
 
-# Neutral current -- NOTE: approximate (assumes isoscalar targets)
+# ============================================================================
+# Cross-section backend switch
+# ----------------------------------------------------------------------------
+# "alfonso" (default): the shipped NNLO tables (Alfonso data files); NC uses
+#   the flat 0.335 x CC_light approximation of the original implementation.
+# "ct18": MINT's own LO DIS calculation with CT18NNLO PDFs (mint.lo_dis) --
+#   the same PDF set, member and Q^2 cut as the differential samplers used in
+#   the physics examples, with a real NC calculation (chiral couplings + Z
+#   propagator). LO vs the NNLO tables agrees at the ~10% level, which also
+#   cross-checks the event-by-event DIS model. Tables are computed once
+#   (seconds) and cached in ~/.cache/mint/.
+# ============================================================================
+_BACKEND = "alfonso"
+_CT18_TABLES = None
+
+
+def use_backend(name):
+    """Select the DIS cross-section backend: "alfonso" (shipped NNLO tables,
+    default) or "ct18" (in-house LO + CT18NNLO, PDF-consistent with the
+    samplers). Affects sigma_lightquark/charm/bottom_CC_* and sigma_NC_*."""
+    global _BACKEND, _CT18_TABLES
+    key = str(name).lower()
+    if key in ("alfonso", "table", "tables"):
+        _BACKEND = "alfonso"
+    elif key in ("ct18", "mint", "lo_ct18", "ct18nnlo"):
+        if _CT18_TABLES is None:
+            from mint import lo_dis
+            _CT18_TABLES = lo_dis.load_tables()
+        _BACKEND = "ct18"
+    else:
+        raise ValueError(f"unknown backend {name!r}: use 'alfonso' or 'ct18'")
+
+
+def current_backend():
+    return _BACKEND
+
+
+def _dispatch(name, Enu):
+    if _BACKEND == "ct18":
+        return _CT18_TABLES[name](Enu)
+    return globals()[f"_alf_{name}"](Enu)
+
+
+def sigma_lightquark_CC_nu(Enu):
+    return _dispatch("sigma_lightquark_CC_nu", Enu)
+
+
+def sigma_lightquark_CC_nubar(Enu):
+    return _dispatch("sigma_lightquark_CC_nubar", Enu)
+
+
+def sigma_charm_CC(Enu, nuflavor="numubar"):
+    """Charm-production CC cross section per nucleon [cm^2], flavour-dispatched.
+    Mirrors :func:`sigma_CC`; use this rather than re-implementing the
+    nu/nubar branch at each call site."""
+    return (sigma_charm_CC_nubar(Enu) if "bar" in nuflavor
+            else sigma_charm_CC_nu(Enu))
+
+
+def sigma_charm_CC_nu(Enu):
+    return _dispatch("sigma_charm_CC_nu", Enu)
+
+
+def sigma_charm_CC_nubar(Enu):
+    return _dispatch("sigma_charm_CC_nubar", Enu)
+
+
+def sigma_bottom_CC_nu(Enu):
+    return _dispatch("sigma_bottom_CC_nu", Enu)
+
+
+def sigma_bottom_CC_nubar(Enu):
+    return _dispatch("sigma_bottom_CC_nubar", Enu)
+
+
 def sigma_NC_nu(Enu):
-    return 0.335 * sigma_lightquark_CC_nu(Enu)
+    if _BACKEND == "ct18":
+        return _CT18_TABLES["sigma_NC_nu"](Enu)
+    return 0.335 * _alf_sigma_lightquark_CC_nu(Enu)
 
 
 def sigma_NC_nubar(Enu):
-    return 0.335 * sigma_lightquark_CC_nubar(Enu)
+    if _BACKEND == "ct18":
+        return _CT18_TABLES["sigma_NC_nubar"](Enu)
+    # 0.36 (not the nu value 0.335): calibrated against the real
+    # chiral-coupling NC of the ct18 backend at 1-5 TeV, where
+    # NC_nubar/CC_light_nubar = 0.35-0.36 (nu: 0.33-0.34).
+    return 0.36 * _alf_sigma_lightquark_CC_nubar(Enu)
+
+
+def sigma_CC(Enu, nuflavor="numubar"):
+    """Total SM CC DIS cross section per nucleon [cm^2] (isoscalar;
+    light + charm + bottom), nu vs nubar picked from the flavor label."""
+    Enu = np.asarray(Enu, float)
+    if "bar" in nuflavor:
+        return (sigma_lightquark_CC_nubar(Enu) + sigma_charm_CC_nubar(Enu)
+                + sigma_bottom_CC_nubar(Enu))
+    return (sigma_lightquark_CC_nu(Enu) + sigma_charm_CC_nu(Enu)
+            + sigma_bottom_CC_nu(Enu))
+
+
+# Charged-current nu_tau DIS (-> tau) for tau-appearance searches.
+# At high energy CC-DIS is flavor-universal; the tau mass only matters near threshold,
+# E_nu > m_tau + m_tau^2/(2 m_N). We take the SM CC-DIS cross section times a simple
+# near-threshold suppression (~1 at multi-TeV). Crude but adequate above ~tens of GeV.
+def tau_threshold_factor(Enu):
+    return np.clip(1.0 - const.m_tau**2 / (2.0 * const.m_avg * np.asarray(Enu, float)), 0.0, 1.0)
+
+
+def sigma_nutau_CC(Enu):
+    return (
+        sigma_lightquark_CC_nu(Enu) + sigma_charm_CC_nu(Enu) + sigma_bottom_CC_nu(Enu)
+    ) * tau_threshold_factor(Enu)
+
+
+def sigma_nutaubar_CC(Enu):
+    return (
+        sigma_lightquark_CC_nubar(Enu)
+        + sigma_charm_CC_nubar(Enu)
+        + sigma_bottom_CC_nubar(Enu)
+    ) * tau_threshold_factor(Enu)
 
 
 # Quasi-Elastic scattering -- NOTE: approximate (also assumes isoscalar targets)

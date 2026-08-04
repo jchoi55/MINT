@@ -225,12 +225,8 @@ tau0_tau = 290.3e-15  # s
 ################################################
 # low-level auxiliary functions
 ################################################
-def get_decay_rate_in_s(G):
-    return 1.0 / G * invGeV_to_s
 
 
-def get_decay_rate_in_cm(G):
-    return 1.0 / G * invGeV_to_cm
 
 
 # phase space function
@@ -238,9 +234,5 @@ def kallen(a, b, c):
     return (a - b - c) ** 2 - 4 * b * c
 
 
-def kallen_sqrt(a, b, c):
-    return np.sqrt(kallen(a, b, c))
 
 
-def rng_interval(size, a, b, rng):
-    return rng(size) * (a - b) + b

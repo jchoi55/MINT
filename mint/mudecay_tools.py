@@ -9,11 +9,6 @@ from scipy.special import spence
 from mint import const
 
 
-def gauss_pdf(x, x0, sigma):
-    if sigma == 0:
-        return np.ones_like(x)
-    else:
-        return np.exp(-((x - x0) ** 2) / (2 * sigma**2)) / sigma / np.sqrt(2 * np.pi)
 
 
 def Fnue0(x):
@@ -99,6 +94,18 @@ def mudecay_matrix_element_sqr(
             / np.pi
             * (Fnumu1(x_nu) - Jnumu1(x_nu) * muon_charge * muon_polarization * costheta)
         )
+    elif "nutau" in nuflavor:
+        # Exotic LNV+LFV decay  mu+ -> nu_mu-bar e+ nu_tau-bar  (and CP conjugate
+        # mu- -> nu_mu e- nu_tau). This is NOT a Standard Model channel; its rate is
+        # BR(exotic) times the total muon width, applied externally to the flux.
+        #
+        # First-pass spectrum: the nu_tau takes the kinematic role of the SM nu_e (it
+        # accompanies the charged lepton), so it inherits the nu_e Michel spectrum and
+        # polarization structure -- appropriate for a V-A contact operator. Swap
+        # Fnue0/Jnue0 -> Fnumu0/Jnumu0 (or a custom shape) for a different operator.
+        # LO only: the SM O(alpha) radiative corrections do not apply to the exotic
+        # operator.
+        return Fnue0(x_nu) - muon_charge * muon_polarization * Jnue0(x_nu) * costheta
     else:
         raise ValueError(f"nuflavor {nuflavor} not recognized.")
 

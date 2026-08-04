@@ -1,7 +1,7 @@
 matplotlib>=3.8
-numpy>=2.2
-packaging>=25
+numpy>=2.0
 pandas>=2.2
 scipy>=1.13
 vegas>=6.2
 vector>=1.6
+pytest>=8

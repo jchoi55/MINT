@@ -1,3 +1,5 @@
+import warnings
+
 import vector
 import numpy as np
 
@@ -20,6 +22,7 @@ class MuDecaySimulator:
         NLO=True,
         mudecay_model="NLOmudecay_pol",
         beam_dynamics=True,
+        aperture_nsigma=5.0,
     ):
         """
         This class is the main simulation class for muon decays in a lattice.
@@ -43,10 +46,34 @@ class MuDecaySimulator:
         # Design contains all necessary inputs to specify the muon storage/accelerator
 
         self.lattice = lattice
+        # Physical aperture: the machine collimates the beam at n sigma of its
+        # transverse extent (the IMCC/MuCol shielding liners are cut to the
+        # 5 sigma envelope, MuCol Milestone 15 Sec. 2.2), so muons are never
+        # found in the far Gaussian tail. Set to None to keep untruncated
+        # Gaussian envelopes. Note this is a tiny effect on the flux: a 2D
+        # Gaussian truncated at 5 sigma retains 1 - exp(-25/2) = 1 - 3.7e-6
+        # of the beam.
+        self.aperture_nsigma = aperture_nsigma
 
         self.n_evals = n_evals
         self.preloaded_events = preloaded_events
-        self.cycles = cycles
+
+        if cycles == "full_injection":
+            # Simulate one full injection period: the number of machine turns the
+            # muons make in 1/finj seconds. The machine circumference is
+            # lattice.total_circumference (the lattice may cover only part of the
+            # machine); for a full-ring lattice it defaults to the lattice length.
+            # Muons are ultra-relativistic, so v = c to better than 1e-9.
+            if self.lattice is None:
+                raise ValueError(
+                    "lattice must be provided when cycles='full_injection'."
+                )
+            C_machine = getattr(self.lattice, "total_circumference", None)
+            if C_machine is None:
+                C_machine = float(self.lattice.s(1))
+            self.cycles = const.c_LIGHT / (self.lattice.finj * C_machine)
+        else:
+            self.cycles = cycles
         self.direction = direction
 
         if isinstance(remove_ring_fraction, float) or isinstance(
@@ -69,9 +96,11 @@ class MuDecaySimulator:
             self.remove_ring_fraction = [0, 0]
 
         self.nuflavor = nuflavor
-        if self.nuflavor == "numu" or self.nuflavor == "nuebar":
+        if self.nuflavor in ("numu", "nuebar", "nutau"):
+            # produced by mu- (mu- -> e- nu_mu nu_e-bar; exotic mu- -> e- nu_mu nu_tau)
             self.muon_charge = -1
-        elif self.nuflavor == "nue" or self.nuflavor == "numubar":
+        elif self.nuflavor in ("nue", "numubar", "nutaubar"):
+            # produced by mu+ (mu+ -> e+ nu_e nu_mu-bar; exotic mu+ -> e+ nu_mu-bar nu_tau-bar)
             self.muon_charge = +1
         else:  # default antimuons
             self.muon_charge = +1
@@ -149,6 +178,10 @@ class MuDecaySimulator:
             self.weights = event_dict["w_flux"] / np.sum(event_dict["w_flux"])
             self.weights = self.weights[:, np.newaxis]
 
+            # Pristine decay weights (before any lattice/exposure factors) --
+            # used to reset the weights on (re-)placement and for reweighting.
+            self.weights_decay = self.weights.copy()
+
             # number of events simulated
             self.sample_size = self.pmu_restframe.size
 
@@ -183,6 +216,153 @@ class MuDecaySimulator:
         self.weights_new_pol = self.weights.flatten() * numerator / denominator
 
         return self.weights_new_pol
+
+    @staticmethod
+    def _muon_charge_for(nuflavor):
+        """Muon charge implied by the requested neutrino flavor (same convention
+        as __init__): numu/nuebar/nutau from mu-, nue/numubar/nutaubar from mu+."""
+        if nuflavor in ("numu", "nuebar", "nutau"):
+            return -1
+        return +1
+
+    def reweighted_copy(self, nuflavor=None, muon_polarization=None, NLO=None):
+        """Return a new simulator that REUSES this simulator's rest-frame decay
+        sample (no new vegas run), reweighted to a different neutrino flavor,
+        muon polarization, and/or NLO setting.
+
+        The muon decay phase space is fully described by the vegas variables
+        (x = 2 E_nu / m_mu, costheta); flavor, polarization and NLO only change
+        the matrix element, so the exact reweighting factor is the ratio of
+        matrix elements evaluated on the stored sample. The reweighted weights
+        are renormalized to sum to 1 (each muon decay produces exactly one
+        neutrino of each flavor), matching the convention of decay_muons().
+
+        Call place_muons_on_lattice() on the returned copy as usual. Lattice
+        placement (positions, boosts, decay-in-flight weights) is redone per
+        copy; only the vegas event generation is shared.
+        """
+        import copy as _copy
+
+        if not hasattr(self, "weights_decay"):
+            raise RuntimeError(
+                "No decay sample available. Run decay_muons() (or load_events) first."
+            )
+
+        new = _copy.copy(self)
+        new.nuflavor = self.nuflavor if nuflavor is None else nuflavor
+        new.muon_polarization = (
+            self.muon_polarization if muon_polarization is None else muon_polarization
+        )
+        new.NLO = self.NLO if NLO is None else NLO
+        new.muon_charge = self._muon_charge_for(new.nuflavor)
+
+        numerator = mudec.mudecay_matrix_element_sqr(
+            self.x_CM,
+            self.costheta_CM,
+            new.muon_polarization,
+            new.muon_charge,
+            new.nuflavor,
+            new.NLO,
+        )
+        denominator = mudec.mudecay_matrix_element_sqr(
+            self.x_CM,
+            self.costheta_CM,
+            self.muon_polarization,
+            self.muon_charge,
+            self.nuflavor,
+            self.NLO,
+        )
+
+        w = self.weights_decay.flatten() * numerator / denominator
+        w = w / np.sum(w)  # exactly one neutrino of this flavor per muon decay
+        new.weights_decay = w[:, np.newaxis]
+        new.weights = new.weights_decay.copy()
+
+        return new
+
+    def save_events(self, filename):
+        """Save the rest-frame decay sample to a compressed .npz file.
+
+        Stores the vegas phase-space variables (x, costheta), the neutrino
+        azimuth, the normalized decay weights, and the generation settings, so
+        the (expensive) vegas run never needs to be repeated: reload with
+        MuDecaySimulator.load_events() and reweight to any flavor/polarization.
+        """
+        if not hasattr(self, "weights_decay"):
+            raise RuntimeError("No decay sample to save. Run decay_muons() first.")
+        np.savez_compressed(
+            filename,
+            x_CM=self.x_CM,
+            costheta_CM=self.costheta_CM,
+            phi_nu=np.asarray(self.pnu_restframe.phi),
+            weights_decay=self.weights_decay.flatten(),
+            muon_polarization=self.muon_polarization,
+            muon_charge=self.muon_charge,
+            nuflavor=str(self.nuflavor),
+            NLO=self.NLO,
+            mudecay_model=str(self.mudecay_model),
+        )
+
+    @classmethod
+    def load_events(cls, filename, **kwargs):
+        """Create a simulator from a decay sample saved with save_events().
+
+        Rebuilds the rest-frame four-momenta from (x, costheta, phi) and restores
+        the stored weights -- no vegas run. Extra keyword arguments (lattice,
+        cycles, beam_dynamics, remove_ring_fraction, ...) are forwarded to the
+        constructor. Use reweighted_copy() afterwards for other flavors or
+        polarizations.
+        """
+        data = np.load(filename, allow_pickle=False)
+
+        sim = cls(
+            muon_polarization=float(data["muon_polarization"]),
+            nuflavor=str(data["nuflavor"]),
+            NLO=bool(data["NLO"]),
+            mudecay_model=str(data["mudecay_model"]),
+            **kwargs,
+        )
+
+        x = np.asarray(data["x_CM"], dtype=float)
+        costheta = np.asarray(data["costheta_CM"], dtype=float)
+        phi = np.asarray(data["phi_nu"], dtype=float)
+
+        sim.x_CM = x
+        sim.costheta_CM = costheta
+        sim.sample_size = x.size
+
+        # Muon at rest; neutrino energy E = x m_mu / 2 with polar angle costheta
+        # (same construction as mudecay_tools.three_body_decay_x_costheta).
+        sim.pmu_restframe = vector.array(
+            {
+                "E": np.full(sim.sample_size, const.m_mu),
+                "px": np.zeros(sim.sample_size),
+                "py": np.zeros(sim.sample_size),
+                "pz": np.zeros(sim.sample_size),
+            }
+        )
+        Enu = const.m_mu / 2 * x
+        sim.pnu_restframe = vector.array(
+            {
+                "E": Enu,
+                "pt": Enu * np.sqrt(1 - costheta**2),
+                "pz": Enu * costheta,
+                "phi": phi,
+            }
+        )
+
+        sim.weights_decay = np.asarray(data["weights_decay"], dtype=float)[
+            :, np.newaxis
+        ]
+        sim.weights = sim.weights_decay.copy()
+        sim.pos = vector.array(
+            {
+                "x": np.zeros(sim.sample_size),
+                "y": np.zeros(sim.sample_size),
+                "z": np.zeros(sim.sample_size),
+            }
+        )
+        return sim
 
     def place_muons_on_lattice(self, lattice=None, direction="clockwise"):
         """Place muon decays on the storage-ring central orbit and rotate their
@@ -234,15 +414,48 @@ class MuDecaySimulator:
             }
         )
 
-        # get total length of the central orbit
+        # Start from the pristine decay weights so that placement is idempotent:
+        # calling place_muons_on_lattice again (or on a reweighted copy) does not
+        # stack exposure/decay factors from a previous placement.
+        if hasattr(self, "weights_decay"):
+            self.weights = self.weights_decay.copy()
+
+        # get total length of the central orbit covered by this lattice
         C = lattice.s(1)  # cm
 
-        total_s = self.cycles * C
+        # Total circumference of the machine (cm). If the lattice describes only a
+        # portion of the machine, set lattice.total_circumference to the full
+        # machine length: decays are then placed only on the covered section, while
+        # the muons propagate (age and decay) over the full circumference -- their
+        # travel times self.mutimes account for the uncovered part of each turn.
+        C_machine = getattr(lattice, "total_circumference", None)
+        if C_machine is None:
+            C_machine = C
+        elif C_machine < C:
+            warnings.warn(
+                f"lattice.total_circumference ({C_machine:.3g} cm) is smaller than "
+                f"the lattice arc length ({C:.3g} cm); ignoring it and treating the "
+                "lattice as the full machine."
+            )
+            C_machine = C
+        elif C_machine > C:
+            warnings.warn(
+                f"The lattice covers only {C / C_machine:.1%} of the machine "
+                f"(arc length {C:.4g} cm of total_circumference {C_machine:.4g} cm). "
+                "Muon decays are placed on the covered section only; muon travel "
+                "times account for propagation through the full machine."
+            )
 
-        # Place muons uniformly along travel path
-        self.s_muon = np.random.uniform(0, total_s, self.sample_size)
-        # s_in_turn is the position of the muons in the current turn
-        self.s_in_turn = (self.s_muon) % C
+        # Exposure (path length) within the covered section, over all cycles
+        covered_s = self.cycles * C
+
+        # Place muon decays uniformly along the covered path
+        s_covered = np.random.uniform(0, covered_s, self.sample_size)
+        # s_in_turn is the position of the muons within the covered section
+        turn = np.floor(s_covered / C)
+        self.s_in_turn = s_covered - turn * C
+        # True path length traveled, including the uncovered part of each turn
+        self.s_muon = turn * C_machine + self.s_in_turn
 
         # parameter u that goes from 0 to 1 along the lattice
         u_parameter = lattice.inv_s(self.s_in_turn)
@@ -299,13 +512,25 @@ class MuDecaySimulator:
         self.vmu = const.c_LIGHT * np.sqrt((1 - (const.m_mu / self.pmu["E"]) ** 2))
 
         # spread muons in time according to number of beam lifetimes desired
+        # (s_muon includes the full-machine path, so times are physical)
         self.mutimes = self.s_muon / self.vmu  # time in seconds
-        max_time = total_s / self.vmu  # final time
+        # exposure time of the sampled (covered) path -- the MC measure
+        max_time = covered_s / self.vmu
 
         self.muon_lifetime = const.tau0_mu * self.pmu["E"] / const.m_mu
 
         # Now, if we want to increase our efficiency in the simulation, we better force particles to be close to the detector in some way.
         # Let's enforce this by clipping the s_in_turn range:
+        if (
+            C_machine > C
+            and self.remove_ring_fraction[0] != self.remove_ring_fraction[1]
+        ):
+            warnings.warn(
+                "remove_ring_fraction is not supported for lattices covering only "
+                "part of the machine (total_circumference > lattice length); "
+                "ignoring it."
+            )
+            self.remove_ring_fraction = [0.5, 0.5]
         zacc_min = C * self.remove_ring_fraction[0]
         zacc_max = C * self.remove_ring_fraction[1]
         events_likely_within_acceptance = (self.s_in_turn <= zacc_min) | (
@@ -326,12 +551,17 @@ class MuDecaySimulator:
         # Apply shift to s_in_this_turn and to the travel time of the muons
         self.s_in_turn = self.s_in_turn + shift_z
         self.mutimes += shift_z / self.vmu
+        self.s_muon = self.s_muon + shift_z
         self.s_in_turn = self.s_in_turn % C
 
-        # Acceptance of simulated region
-        # self.weights[:, 0] = self.weights[:, 0] * (zacc_min + (C - zacc_max)) / C
+        # Acceptance of the simulated region: after the shift ALL samples land
+        # in the kept window (natives at per-turn density 1/C, shifted ones at
+        # (C - W_acc)/C * 1/W_acc; combined exactly 1/W_acc), so each sample
+        # over-represents the uniform-ring measure by C/W_acc. Scale by
+        # W_acc/C to keep the decay estimator unbiased. No-op when nothing is
+        # removed (W_acc = C).
+        self.weights[:, 0] *= (zacc_min + (C - zacc_max)) / C
 
-        # print("before:", sum(self.weights[:, 0]))
         # Apply exponential suppression on total length travelled by muons
         self.weights[:, 0] *= (
             # 1 - np.exp(-self.mutimes / self.muon_lifetime)
@@ -340,15 +570,6 @@ class MuDecaySimulator:
             * np.exp(-self.mutimes / self.muon_lifetime)
             / self.muon_lifetime
         )
-
-        # print("max time: ", max_time)
-        # print("number of samples: ", self.sample_size)
-        # print("total s: ", total_s)
-        # print("delta t: ", max_time/self.sample_size)
-        # print("Nmu per bunch: ", lattice.Nmu_per_bunch)
-        # print("muon lifetime: ", self.muon_lifetime)
-        # print("mu times: ",self.mutimes)
-        # print("after:", sum(self.weights[:, 0]))
 
         # Now place the decays in world coordinates along the central orbit.
         # The lattice returns world coordinates directly:
@@ -360,16 +581,31 @@ class MuDecaySimulator:
         # Sample the transverse beam envelopes (0 if beam dynamics are disabled).
         #   beamsize_x -> horizontal offset,  beamsize_y -> vertical offset.
         if self.beam_dynamics:
-            x_horizontal = np.random.normal(
-                loc=0.0,
-                scale=lattice.beamsize_x(u_parameter),
-                size=self.sample_size,
-            )
-            x_vertical = np.random.normal(
-                loc=0.0,
-                scale=lattice.beamsize_y(u_parameter),
-                size=self.sample_size,
-            )
+            sig_x = np.broadcast_to(
+                np.asarray(lattice.beamsize_x(u_parameter), dtype=float),
+                (self.sample_size,)).copy()
+            sig_y = np.broadcast_to(
+                np.asarray(lattice.beamsize_y(u_parameter), dtype=float),
+                (self.sample_size,)).copy()
+            # Collimate at the physical aperture: draw the transverse offsets
+            # from a Gaussian TRUNCATED at the n-sigma envelope ellipse,
+            # (x/sig_x)^2 + (y/sig_y)^2 <= n^2. This is the machine aperture the
+            # MuCol shielding liners are cut to; mint.beamline.StraightSectionShield
+            # uses the same envelope for the inner radius of the tungsten.
+            # Sampling directly in normalized polar coordinates is exact and
+            # needs no rejection loop: the squared normalized radius of a 2D
+            # Gaussian is Exp(1/2), truncated to [0, n^2] by inverting its CDF.
+            n_ap = self.aperture_nsigma
+            g1 = np.random.normal(size=self.sample_size)
+            g2 = np.random.normal(size=self.sample_size)
+            if n_ap is not None and n_ap > 0:
+                phi = np.random.uniform(0.0, 2.0 * np.pi, self.sample_size)
+                u_r = np.random.uniform(0.0, 1.0, self.sample_size)
+                r2 = -2.0 * np.log1p(-u_r * (-np.expm1(-0.5 * n_ap**2)))
+                r_n = np.sqrt(r2)
+                g1, g2 = r_n * np.cos(phi), r_n * np.sin(phi)
+            x_horizontal = g1 * sig_x
+            x_vertical = g2 * sig_y
         else:
             x_horizontal = np.zeros(self.sample_size)
             x_vertical = np.zeros(self.sample_size)
@@ -428,61 +664,55 @@ class MuDecaySimulator:
         # -- the same origin the detectors are placed relative to. mutimes_to_bunchx
         # is 0 for a muon exactly at the IP, positive just after it (already crossed),
         # and negative just before it (about to cross).
-        u_grid = np.linspace(0.0, 1.0, 20001)
-        dist2_to_origin = (
-            lattice.x(u_grid) ** 2 + lattice.y(u_grid) ** 2 + lattice.z(u_grid) ** 2
-        )
-        s_IP = float(lattice.s(u_grid[np.argmin(dist2_to_origin)]))
+        # The IP arc length only depends on the lattice, so cache it there.
+        # NOTE: a single coarse scan is not enough. The grid spacing (~7 cm for
+        # a 1.5 km lattice on 20001 points) leaves the "IP" point up to a few cm
+        # from the true orbit crossing, and since the detector distance is
+        # measured from the world origin, that mismatch enters the arrival times
+        # directly as (offset)/c -- tens of ps, i.e. LARGER than the physical
+        # bunch-length spread. Refine locally around the coarse minimum.
+        if not hasattr(lattice, "_s_IP"):
+            def _dist2(uu):
+                return (lattice.x(uu) ** 2 + lattice.y(uu) ** 2
+                        + lattice.z(uu) ** 2)
 
-        # Signed arc distance from the IP within one turn, wrapped to [-C/2, C/2).
-        delta_s = (self.s_in_turn - s_IP + C / 2.0) % C - C / 2.0
+            u_grid = np.linspace(0.0, 1.0, 20001)
+            i0 = int(np.argmin(_dist2(u_grid)))
+            du = u_grid[1] - u_grid[0]
+            lo, hi = max(u_grid[i0] - du, 0.0), min(u_grid[i0] + du, 1.0)
+            for _ in range(4):  # ~1e-4 of the coarse spacing after 4 passes
+                u_fine = np.linspace(lo, hi, 2001)
+                j = int(np.argmin(_dist2(u_fine)))
+                step = u_fine[1] - u_fine[0]
+                lo, hi = max(u_fine[j] - step, 0.0), min(u_fine[j] + step, 1.0)
+            lattice._s_IP = float(lattice.s(0.5 * (lo + hi)))
+        s_IP = lattice._s_IP
+
+        # Signed arc distance from the IP within one machine turn, wrapped to
+        # [-C_machine/2, C_machine/2). The covered section occupies machine arc
+        # [0, C), so s_in_turn is also the position along the machine.
+        delta_s = (
+            self.s_in_turn - s_IP + C_machine / 2.0
+        ) % C_machine - C_machine / 2.0
+        # A counter-clockwise bunch moves toward decreasing s: a muon at
+        # s > s_IP has NOT yet crossed the IP, so the signed time flips.
+        if direction == "counter-clockwise":
+            delta_s = -delta_s
         self.mutimes_to_bunchx = delta_s / self.vmu
 
-        # print("sample_size:", self.sample_size)
-        # print(
-        #     "pos x range:",
-        #     np.min(self.pos["x"]),
-        #     np.mean(self.pos["x"]),
-        #     np.max(self.pos["x"]),
-        # )
-        # print(
-        #     "pos y range:",
-        #     np.min(self.pos["y"]),
-        #     np.mean(self.pos["y"]),
-        #     np.max(self.pos["y"]),
-        # )
-        # print(
-        #     "pos z range:",
-        #     np.min(self.pos["z"]),
-        #     np.mean(self.pos["z"]),
-        #     np.max(self.pos["z"]),
-        # )
-        # print("s_in_turn min/max:", np.min(self.s_in_turn), np.max(self.s_in_turn))
-        # print("u_parameter min/max:", np.min(u_parameter), np.max(u_parameter))
-        # print("mutimes min/max:", np.min(self.mutimes), np.max(self.mutimes))
-        # print(
-        #     "muon_lifetime min/max:",
-        #     np.min(self.muon_lifetime),
-        #     np.max(self.muon_lifetime),
-        # )
+        # Finite bunch length: a muon at longitudinal offset dz within the bunch
+        # (dz > 0 = ahead of the bunch centroid) crosses the IP dz/v earlier than
+        # the centroid, so its decay time relative to the bunch crossing shifts
+        # by -dz/v. The decay positions themselves are unaffected (a ~mm smear of
+        # a distribution that is uniform along the ring).
+        if self.beam_dynamics:
+            dz_bunch = np.random.normal(
+                loc=0.0,
+                scale=lattice.beamsize_z(u_parameter) * np.ones(self.sample_size),
+            )
+            self.mutimes_to_bunchx -= dz_bunch / self.vmu
 
         return self
-
-    def get_transverse_(self, det_location=[0, 0, 1e5]):
-
-        det_vector = vector.array(
-            {"x": det_location[0], "y": det_location[1], "z": det_location[2]}
-        )
-
-        # normal_to_detector_plane = det_vector.unit()
-        distances = det_vector - self.pos
-        neutrino_direction = self.pnu.to_3D().unit()
-
-        # Project distance vector onto neutrino direction
-        sintheta = np.sqrt(1 - distances.unit().dot(neutrino_direction) ** 2)
-
-        # Position of closest approach on the neutrino path
-        radial_distance = sintheta * distances.mag
 
     def get_flux_at_generic_location(
         self,
@@ -559,498 +789,6 @@ class MuDecaySimulator:
             return ebins, 0 * ebins[:-1]
 
 
-# class BINSimulator:
-#     """
-#       Main class of MuC library
-
-#       Simulates all beam-induced neutrino interactions in a given MuC detector.
-
-#       Hierarchy is as follows:
-#           Initializes by creating instances of DecaySimulation.
-
-#           self.run(), runs simulations of many SimNeutrinos based on the collision type,
-#     which is a single-neutrino-species MC generation of events within a detector, which are all saved in a list in the .sims attribute.
-#     """
-
-#     def __init__(
-#         self,
-#         design,
-#         n_evals=1e5,
-#         preloaded_events=None,
-#         det_geom="det_v2",
-#         save_mem=True,
-#         lattice=None,
-#         remove_ring_fraction=0,
-#     ):
-#         """Initializes a BIN simulation for a given detector geometry and collider lattice"""
-
-#         self.save_mem = save_mem
-#         self.design = design
-#         self.det_geom = getattr(mint, det_geom)
-#         if isinstance(remove_ring_fraction, float) or isinstance(
-#             remove_ring_fraction, int
-#         ):
-#             self.remove_ring_fraction = [
-#                 (1 - remove_ring_fraction) / 2,
-#                 (1 + remove_ring_fraction) / 2,
-#             ]
-#         elif isinstance(remove_ring_fraction, list) or isinstance(
-#             remove_ring_fraction, tuple
-#         ):
-#             self.remove_ring_fraction = [
-#                 (1 - remove_ring_fraction[0]) / 2,
-#                 (1 + remove_ring_fraction[1]) / 2,
-#             ]
-
-#         else:
-#             print("No remove_ring_fraction specified. Using all ring.")
-#             self.remove_ring_fraction = [0, 0]
-
-#         self.lattice = lattice
-#         if isinstance(self.lattice, str):
-#             try:
-#                 with open(lattice, "rb") as f:
-#                     self.lattice = pickle.load(f)
-#             except Exception as errormessage:
-#                 print(errormessage)
-#                 raise ValueError(f"Could not load lattice from file: {lattice}.")
-#         elif isinstance(self.lattice, dict):
-#             self.lattice = lattice
-#             assert (
-#                 "x" in self.lattice.keys()
-#             ), f"Need x(u) in lattice dictionary. Found keys: {self.lattice.keys()}"
-#             assert (
-#                 "inv_s" in self.lattice.keys()
-#             ), "Need inverse function of s(u) in lattice dictionary."
-#         else:
-#             print("No lattice specified. Using simplified ring geometry.")
-#             self.lattice = None
-
-#         # Total length of the ring in cm
-#         self.C = self.lattice["s"](1) if self.lattice is not None else self.design["C"]
-#         self.beam_lifetime = 1 / self.design["finj"]
-#         self.n_turns = self.beam_lifetime / (self.C / const.c_LIGHT)
-#         self.bunchx_in_a_year = (
-#             self.n_turns
-#             * self.design["duty_factor"]
-#             * self.design["finj"]
-#             * self.design["bunch_multiplicity"]
-#             * np.pi
-#             * 1e7  # seconds in a year
-#         )
-
-#         # Detector geometry
-#         self.comps = list(self.det_geom.facedict.keys())
-#         self.zending = self.det_geom.zending
-#         self.rmax = self.det_geom.rmax
-
-#         self.n_evals = n_evals
-
-#         # Container for all simulations
-#         self.mustorage_sims = []
-#         self.beam_cases = col.colls_types_to_beam_cases[self.design["collision_type"]]
-#         self.nuflavors = [part[0] for part in self.beam_cases]
-#         for nuflavor, direction in self.beam_cases:
-#             self.mustorage_sims.append(
-#                 MuDecaySimulator(
-#                     design=design,
-#                     nuflavor=nuflavor,
-#                     direction=direction,
-#                     n_evals=n_evals,
-#                     beam_lifetime=self.beam_lifetime,
-#                     preloaded_events=preloaded_events,
-#                     remove_ring_fraction=self.remove_ring_fraction,
-#                 )
-#             )
-
-#         # Number of simulations
-#         self.nsims = len(self.mustorage_sims)
-
-#     # @profile
-#     def run(
-#         self,
-#         show_components=0,
-#         show_time=0,
-#     ):
-#         """Runs the whole simulation, based on a storage ring geometry, detector geometry, and collision.
-
-#         Args:
-#             show_components (bool): for distribution within different detector components.
-#             show_time (bool): for time summary.
-#             geom (str): the detector version. Latest is det_v2; uniform block is block_test; zero_density_test is exactly that; and det_v1 is simpler.
-#             Lss (float): Length of the straight segment upon which the IR detector is centered.
-#         """
-
-#         # Attempts to perform a muon decay simulation
-#         self.sims = []
-#         for mu_sim in self.mustorage_sims:
-
-#             # Decay muons
-#             mu_sim.decay_muons()
-
-#             # Place muon along the collider ring
-#             if self.lattice is not None:
-#                 mu_sim.place_muons_on_lattice(
-#                     direction="left",  # mu_sim.direction,
-#                     lattice=self.lattice,
-#                 )
-#             else:
-#                 mu_sim.place_muons_on_simplified_ring(
-#                     C=self.C,
-#                     Lss=self.design["Lss"],
-#                     direction="left",  # mu_sim.direction,
-#                 )
-#             # Now onto the detector simulations
-#             det_sim = DetectorSimulator(mu_sim, self.det_geom, save_mem=self.save_mem)
-#             det_sim.run()
-
-#             # NOTE: This weight is per bunch
-#             det_sim.w *= (
-#                 self.design["finj"]
-#                 * self.design["duty_factor"]
-#                 * self.design["bunch_multiplicity"]
-#                 * np.pi
-#                 * 1e7  # s in a year
-#             )
-
-#             det_sim.calculate_facecounts()
-
-#             if self.save_mem:
-#                 det_sim.clear_mem()
-
-#             self.sims.append(det_sim)
-
-#         self.total_count = np.sum([np.sum(self.sims[i].w) for i in range(self.nsims)])
-
-#         self.name = self.design["name"]
-#         # print(f"Successfully simulated neutrino event rates within {self.geom.name}:")
-#         # print(
-#         # f"{self.name} ({col.acc_colls_dict[self.design['collision_type']]}) at L = {self.design['Lss']:.2f} m."
-#         # )
-#         print(f"Total count: {self.total_count:.2e} events;\n")
-
-#         self.facecounts = self.get_face_counts()
-#         self.get_exclusive_rates()
-
-#         if show_components:
-#             self.print_face_counts()
-
-#         if show_time:
-#             self.print_timetable()
-
-#         return self
-
-#     def reweight_with_new_polarization(self, new_polarization):
-
-#         for sim in self.sims:
-#             sim.calculate_facecounts_new_pol(new_polarization)
-#         return self.get_face_counts_new_pol()
-
-#     def get_exclusive_rates(self):
-#         """
-#         Calculate and aggregate exclusive rates for all neutrino species.
-#         This method performs the following steps:
-#         1. Initializes an empty dictionary `self.exclusive_rates`.
-#         2. Iterates over all simulations in `self.sims` and retrieves their exclusive rates.
-#         3. Aggregates the exclusive rates for each neutrino flavor, component, and channel.
-#         4. Initializes an empty dictionary `self.exclusive_rates_combined`.
-#         5. Aggregates the exclusive rates for ECAL and HCAL components across all neutrino species.
-#         6. Ensures that all test flavors ("nue", "numu", "nuebar", "numubar") have entries in `self.exclusive_rates_combined`, initializing them to 0 if they do not exist.
-#         The resulting exclusive rates are stored in `self.exclusive_rates` and `self.exclusive_rates_combined`.
-#         Returns:
-#             None
-#         """
-
-#         # Append exclusive rates all neutrino species
-#         self.exclusive_rates = {}
-#         for s in self.sims:
-#             s.get_exclusive_rates()
-#             for (comp, channel), rate in s.get_exclusive_rates().items():
-#                 key = s.nuflavor, comp, channel.replace(s.nuflavor + "_", "")
-#                 if key in self.exclusive_rates.keys():
-#                     self.exclusive_rates[key] += rate
-#                 else:
-#                     self.exclusive_rates[key] = rate
-
-#         # Exclusive rates from all neutrino species within ECAL and HCAL
-#         self.exclusive_rates_combined = {}
-#         for (flavor, comp, channel), rate in self.exclusive_rates.items():
-#             if comp == "hcal" or comp == "ecal":
-#                 if (flavor, channel) in self.exclusive_rates_combined.keys():
-#                     self.exclusive_rates_combined[flavor, channel] += rate
-#                 else:
-#                     self.exclusive_rates_combined[flavor, channel] = rate
-#         for test_flavor in ["nue", "numu", "nuebar", "numubar"]:
-#             for (flavor, comp, channel), rate in self.exclusive_rates.items():
-#                 if (test_flavor, channel) in self.exclusive_rates_combined.keys():
-#                     continue
-#                 else:
-#                     self.exclusive_rates_combined[test_flavor, channel] = 0
-
-#     def event_timing(
-#         self,
-#         fs=(20, 12),
-#         histtype="barstacked",
-#         nbins=100,
-#         savefig=None,
-#         legend=False,
-#         title=True,
-#         sec="all",
-#         nuflavor="all",
-#     ):
-#         """Wrapper to plot neutrino interaction times.
-
-#         Args:
-#             savefig (str): name of file to save plot to.
-#             fs (tuple): figsize of plot. Can be None to display on the same plot that is being worked on.
-#             title (bool): if one wants to display the pre-generated title.
-#             legend (bool): to display the pre-generated legend.
-#             sec (str): the component of the detector one wants to single out. Options are the sames as those written in get_data() method description.
-#             nuflavor (str): a particle one would want to single out. Can be either nue, nuebar, numu, or numubar.
-#         """
-
-#         if fs:
-#             plt.figure(figsize=fs)
-
-#         _, _, _, w, times, _, _ = self.get_data(sec=sec, nuflavor=nuflavor)
-
-#         label = f"{sec}; " + r"$N_{events}$" + f": {np.sum(w):.3e}"
-
-#         if sec == "all":
-#             label = r"$L_{ss} = $" + f"{self.design['Lss']:.0f} m"
-
-#         times *= 1e9
-
-#         plt.xlabel("Time before collision (ns)")
-#         plt.ylabel(r"$N_{events}$")
-
-#         if title:
-#             plt.title(
-#                 f"Event Timing (wrt bunch crossing); ({self.name} at L = {self.design['Lss']:.2f})"
-#             )
-
-#         plt.hist(times, weights=w, histtype=histtype, bins=nbins, label=label)
-
-#         if legend:
-#             plt.legend(loc="best")
-
-#         plt.yscale("log")
-
-#         if savefig:
-#             plt.savefig(savefig, bbox_inches="tight", dpi=300)
-
-#     def get_GENIE_flux(self, sec, nuflavor, nbins=50):
-#         """
-#         Calculate the GENIE flux histogram for a given section and neutrino flavor.
-
-#         Parameters:
-#         sec (int): Detector component to consider.
-#         nuflavor (str): Neutrino flavor. Can be either nue, nuebar, numu, or numubar.
-#         nbins (int, optional): The number of bins for the histogram. Default is 50.
-
-#         Returns:
-#         tuple: A tuple containing the bin edges and the histogram values.
-#         """
-#         _, _, _, w, _, E, _ = self.get_data(sec=sec, nuflavor=nuflavor, genie=1)
-#         h = np.histogram(E, weights=w, bins=nbins)
-#         return h[1], h[0]
-
-#     def print_GENIE_flux_to_file(self, sec, nuflavor, nbins=50, filename=None):
-#         """
-#             Creates a flux .data file for GENIE simulation of events.
-
-#             sec (str): Detector component to consider.
-#             nuflavor (str): Neutrino flavor. Can be either nue, nuebar, numu, or numubar.
-#             nbins (int, optional): Number of bins for the histogram. Default is 50.
-#             filename (str, optional): Name of file to be saved in the fluxes/ folder. If not provided, a default name will be generated.
-
-#         Returns:
-#             None
-
-#         Saves:
-#             A .data file containing the flux information for GENIE simulation.
-#         """
-
-#         if filename:
-#             fn = f"{filename}"
-
-#         else:
-#             fn = f"fluxes/{self.design['short_name']}_{mint.compsto2[sec]}_{nuflavor}.data"
-
-#         bins, flux = self.get_GENIE_flux(sec, nuflavor, nbins=nbins)
-#         bin_centers = bins[:-1] + np.diff(bins) / 2
-#         np.savetxt(fn, np.array([bin_centers, flux]).T)
-#         print(f"Flux file saved to {fn}")
-
-#     def plot_GENIE_flux(self, sec, nuflavor, nbins=50, ax=None):
-#         """
-#         Plots the GENIE flux for a given neutrino flavor and sector.
-
-#         Parameters:
-#             sec (str): The detector section for which the flux is to be plotted.
-#             nuflavor (str): Neutrino flavor. Can be either nue, nuebar, numu, or numubar.
-#             nbins (int), optional: The number of bins to use for the histogram (default is 50).
-#             ax (matplotlib.axes.Axes), optional: The axes on which to plot the histogram. If None, a new figure and axes are created (default is None).
-
-#         Returns:
-#             None
-#         """
-
-#         bins, flux = self.get_GENIE_flux(sec=sec, nuflavor=nuflavor, nbins=nbins)
-#         if ax is None:
-#             fig, ax = plt.subplots()
-#         _ = ax.hist(
-#             bins[:-1] + np.diff(bins) / 2,
-#             weights=flux,
-#             bins=bins,
-#             histtype="step",
-#             label=nuflavor + "_" + sec,
-#         )
-
-#     def get_GENIE_event_weight(self, comp, p, n_events):
-#         """Getting the weight of a genie particle from its detector component."""
-#         try:
-#             return (
-#                 self.facecounts[comp, p + "_left"] / n_events
-#             )  # the last factor depends on how many generated events there are in the files. It only supports same n files across detectors.
-#         except KeyError:
-#             return self.facecounts[comp, p + "_right"] / n_events  #
-#         except KeyError:
-#             return 0
-
-#     def load_GENIE_file(self, filename, n_events=1e5):
-#         """Loads a single GENIE analysis file, adding respective weights based on this simulation's number of BIN interactions.
-
-#         Args:
-#             filename (str): name of the GENIE file to load.
-#             n_events: number of events that the GENIE file had.
-
-#         """
-
-#         with open(filename, "r") as file:
-
-#             for i, line in enumerate(file):
-
-#                 if i == 0:
-#                     continue
-
-#                 elif i == 1:
-#                     exp = (line.split(":")[1])[:-1]
-
-#                 elif i == 2:
-#                     particles = ((line.split(":")[1])[:-1]).split(",")
-
-#                 elif i == 3:
-#                     comps = (line.split(":")[1])[:-1]
-
-#                 else:
-#                     break
-
-#         expname = exp
-#         parts = [mint.partn_names[part] for part in particles]
-
-#         particlenames = ", ".join(parts)
-#         t = comps.replace(",", ", ")
-
-#         print(f"Loading generated data for a {expname} experiment;")
-#         print(
-#             f"It includes interactions from {particlenames} within the {t} of the muon detector."
-#         )
-
-#         data = pd.read_csv(filename, sep=r"\s+", skiprows=5)
-
-#         print("Adding weights...")
-#         try:
-#             data["w"] = data.apply(
-#                 lambda row: self.get_GENIE_event_weight(
-#                     row["DComp"], mint.pdg2names[str(row["IncL"])], n_events=n_events
-#                 ),
-#                 axis=1,
-#             )
-#         except KeyError:
-#             data["w"] = data.apply(
-#                 lambda row: self.get_GENIE_event_weight(
-#                     row["DComp"], str(row["Particle"]), n_events=n_events
-#                 ),
-#                 axis=1,
-#             )
-
-#         if "Q2" in data.columns:
-#             data["Q2"] = get_Q2(data["nu_E"], data["E"], data["pz"])
-
-#         print("Done!")
-
-#         return data
-
-#     def load_genie_events(self, filenames, n_events=1e6):
-#         """
-#         Load GENIE events from the specified filenames.
-#         Parameters:
-#         filenames (str or list of str): The filename(s) from which to load GENIE events.
-#                                         Can be a single filename or a list of filenames.
-#         n_events (int, optional): The number of events to load. Default is 1e6.
-
-#         Returns: None
-#             This method sets the following attributes:
-#                 - genie_events: A DataFrame containing the loaded GENIE events.
-#                 - genie_e: A boolean array indicating electron events.
-#                 - genie_mu: A boolean array indicating muon events.
-#                 - genie_tau: A boolean array indicating tau events.
-#                 - genie_nue: A boolean array indicating electron neutrino events.
-#                 - genie_numu: A boolean array indicating muon neutrino events.
-#                 - genie_nutau: A boolean array indicating tau neutrino events.
-#                 - genie_nuebar: A boolean array indicating electron antineutrino events.
-#                 - genie_numubar: A boolean array indicating muon antineutrino events.
-#                 - genie_nutaubar: A boolean array indicating tau antineutrino events.`
-#         """
-
-#         if isinstance(filenames, list):
-#             data_cases = []
-#             for filename in filenames:
-#                 data_cases.append(
-#                     self.load_GENIE_file(f"{filename}", n_events=n_events)
-#                 )
-#             self.genie_events = pd.concat(data_cases, axis=0)
-#         else:
-#             self.genie_events = self.load_GENIE_file(f"{filenames}", n_events=n_events)
-
-#         try:
-#             self.genie_e = np.abs(self.genie_events["OutL"]) == 11
-#             self.genie_mu = np.abs(self.genie_events["OutL"]) == 13
-#             self.genie_tau = np.abs(self.genie_events["OutL"]) == 15
-
-#             self.genie_nue = self.genie_events["IncL"] == 12
-#             self.genie_numu = self.genie_events["IncL"] == 14
-#             self.genie_nutau = self.genie_events["IncL"] == 16
-
-#             self.genie_nuebar = self.genie_events["IncL"] == -12
-#             self.genie_numubar = self.genie_events["IncL"] == -14
-#             self.genie_nutaubar = self.genie_events["IncL"] == -16
-#         except KeyError:
-#             self.genie_e = (self.genie_events["Name"] == "e-") | (
-#                 self.genie_events["Name"] == "e+"
-#             )
-#             self.genie_mu = (self.genie_events["Name"] == "mu-") | (
-#                 self.genie_events["Name"] == "mu+"
-#             )
-#             self.genie_tau = (self.genie_events["Name"] == "tau-") | (
-#                 self.genie_events["Name"] == "tau+"
-#             )
-
-#             self.genie_nue = self.genie_events["Particle"] == "nue"
-#             self.genie_numu = self.genie_events["Particle"] == "numu"
-#             self.genie_nutau = self.genie_events["Particle"] == "nutau"
-
-#             self.genie_nuebar = self.genie_events["Particle"] == "nuebar"
-#             self.genie_numubar = self.genie_events["Particle"] == "numubar"
-#             self.genie_nutaubar = self.genie_events["Particle"] == "nutaubar"
-
-#         return self.genie_events
-
-
-def get_Q2(nu_E, E, pz):
-    """Getting Q squared from the generated events."""
-    return -1 * ((nu_E - E) ** 2 - (nu_E - pz) ** 2)
 
 
 def get_flux(x, w, nbins):

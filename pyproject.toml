@@ -4,12 +4,14 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mint-muc"
-version = "0.0.1"
+version = "0.3.0"
 description = "Muon Induced Neutrino Tool (MINT): neutrino fluxes for muon facilities"
 readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
 requires-python = ">=3.10"
 authors = [
-  { name = "" }
+  { name = "Matheus Hostert", email = "matheus-hostert@uiowa.edu" },
 ]
 keywords = ["physics", "neutrino", "muon", "collider", "simulation"]
 classifiers = [
@@ -23,8 +25,7 @@ classifiers = [
 ]
 dependencies = [
   "matplotlib>=3.8",
-  "numpy>=2.2",
-  "packaging>=25",
+  "numpy>=2.0",
   "pandas>=2.2",
   "scipy>=1.13",
   "vegas>=6.2",
@@ -35,12 +36,25 @@ dependencies = [
 dev = [
   "build>=1.2.2",
   "twine>=6.1",
+  "ruff>=0.4",
+  "jupyter",
+]
+# The in-house CT18 cross-section backend (mint.lo_dis / use_backend("ct18"))
+ct18 = [
+  "parton",
+]
+# Extra tools used by the physics case studies in physics-examples/
+# (deliberately NOT dependencies of mint itself)
+examples = [
+  "DarkNews",
+  "parton",
+  "nupyprop",
 ]
 
 [project.urls]
-Homepage = "https://github.com/jchoi55/MINT"
-Repository = "https://github.com/jchoi55/MINT"
-Issues = "https://github.com/jchoi55/MINT/issues"
+Homepage = "https://github.com/mhostert/MINT"
+Repository = "https://github.com/mhostert/MINT"
+Issues = "https://github.com/mhostert/MINT/issues"
 
 [tool.setuptools]
 include-package-data = true
@@ -52,4 +66,16 @@ include = ["mint*"]
 [tool.setuptools.package-data]
 mint = [
   "xsec_data/**/*",
+  "lattice_data/*",
 ]
+
+[tool.setuptools.exclude-package-data]
+"*" = ["**/.DS_Store", ".DS_Store", "**/*.pyc", "**/__pycache__/**"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "NPY"]
+ignore = ["E501"]

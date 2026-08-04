@@ -1,3 +1,3 @@
 include README.md
 recursive-include mint/xsec_data *
-recursive-include beam-optics *
+recursive-include mint/lattice_data *

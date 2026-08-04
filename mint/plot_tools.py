@@ -1,3 +1,5 @@
+import shutil
+
 from cycler import cycler
 import numpy as np
 from scipy.stats import chi2
@@ -31,8 +33,11 @@ rcparams = {
     "legend.frameon": False,
     "legend.loc": "best",
 }
-plt.rcParams["text.latex.preamble"] = r"\usepackage{amsmath}\usepackage{amssymb}"
-rc("text", usetex=True)
+# Use LaTeX text rendering when a LaTeX installation is available; otherwise
+# fall back to matplotlib's mathtext so plots still render everywhere.
+if shutil.which("latex"):
+    plt.rcParams["text.latex.preamble"] = r"\usepackage{amsmath}\usepackage{amssymb}"
+    rc("text", usetex=True)
 rc("font", **{"family": "serif", "serif": ["Computer Modern Roman"]})
 matplotlib.rcParams["hatch.linewidth"] = 0.3
 
@@ -61,16 +66,10 @@ def get_CL_from_sigma(sigma):
     return erf(sigma / np.sqrt(2))
 
 
-def get_chi2vals_w_nsigmas(n_sigmas, ndof):
-    return [chi2.ppf(get_CL_from_sigma(i), ndof) for i in range(n_sigmas + 1)]
 
 
-def get_chi2vals_w_sigma(sigma, ndof):
-    return chi2.ppf(get_CL_from_sigma(sigma), ndof)
 
 
-def get_chi2vals_w_CL(CLs, ndof):
-    return [chi2.ppf(cl, ndof) for cl in CLs]
 
 
 def std_fig(ax_form=std_axes_form, figsize=std_figsize, rasterized=False):
@@ -80,127 +79,15 @@ def std_fig(ax_form=std_axes_form, figsize=std_figsize, rasterized=False):
     return fig, ax
 
 
-def double_axes_fig(
-    height=0.5,
-    gap=0.1,
-    axis_base=[0.14, 0.1, 0.80, 0.18],
-    figsize=std_figsize,
-    split_y=False,
-    split_x=False,
-    rasterized=False,
-):
-    fig = plt.figure(figsize=figsize)
-
-    if split_y and not split_x:
-        axis_base = [0.14, 0.1, 0.80, 0.4 - gap / 2]
-        axis_appended = [0.14, 0.5 + gap / 2, 0.80, 0.4 - gap / 2]
-
-    elif not split_y and split_x:
-        axis_appended = [0.14, 0.1, 0.4 - gap / 2, 0.8]
-        axis_base = [0.14 + 0.4 + gap / 2, 0.1, 0.4 - gap / 2, 0.8]
-
-    else:
-        axis_base[-1] = height
-        axis_appended = axis_base + np.array(
-            [0, height + gap, 0, 1 - 2 * height - gap - axis_base[1] - 0.07]
-        )
-
-    ax1 = fig.add_axes(axis_appended, rasterized=rasterized)
-    ax2 = fig.add_axes(axis_base, rasterized=rasterized)
-    ax1.patch.set_alpha(0.0)
-    ax2.patch.set_alpha(0.0)
-
-    return fig, [ax1, ax2]
 
 
-def data_plot(ax, X, Y, xerr, yerr, zorder=2, label="data", **kwargs):
-    return ax.errorbar(
-        X,
-        Y,
-        yerr=yerr,
-        xerr=xerr,
-        marker="o",
-        markeredgewidth=0.75,
-        capsize=1,
-        markerfacecolor="black",
-        markeredgecolor="black",
-        ms=1.75,
-        lw=0.0,
-        elinewidth=0.75,
-        color="black",
-        label=label,
-        zorder=zorder,
-        **kwargs,
-    )
 
 
-def step_plot(
-    ax, x, y, lw=1, color="red", label="signal", where="post", dashes=(3, 0), zorder=3
-):
-    return ax.step(
-        np.append(x, np.max(x) + x[-1]),
-        np.append(y, 0.0),
-        where=where,
-        lw=lw,
-        dashes=dashes,
-        color=color,
-        label=label,
-        zorder=zorder,
-    )
 
 
-def plot_MB_vertical_region(ax, color="dodgerblue", label=r"MiniBooNE $1 \sigma$"):
-    ##########
-    # MINIBOONE 2018
-    matplotlib.rcParams["hatch.linewidth"] = 0.7
-    y = [0, 1e10]
-    NEVENTS = 381.2
-    ERROR = 85.2
-    xleft = (NEVENTS - ERROR) / NEVENTS
-    xright = (NEVENTS + ERROR) / NEVENTS
-    ax.fill_betweenx(
-        y,
-        [xleft, xleft],
-        [xright, xright],
-        zorder=3,
-        ec=color,
-        fc="None",
-        hatch="\\\\\\\\\\",
-        lw=0,
-        label=label,
-    )
-
-    ax.vlines(1, 0, 1e10, zorder=3, lw=1, color=color)
-    ax.vlines(xleft, 0, 1e10, zorder=3, lw=0.5, color=color)
-    ax.vlines(xright, 0, 1e10, zorder=3, lw=0.5, color=color)
 
 
 # Function to find the path that connects points in order of closest proximity
-def nearest_neighbor_path(points):
-    # Compute the pairwise distance between points
-    dist_matrix = squareform(pdist(points))
-
-    # Set diagonal to a large number to avoid self-loop
-    np.fill_diagonal(dist_matrix, np.inf)
-
-    # Start from the first point
-    current_point = 0
-    path = [current_point]
-
-    # Find the nearest neighbor of each point
-    while len(path) < len(points):
-        # Find the nearest point that is not already in the path
-        nearest = np.argmin(dist_matrix[current_point])
-        # Add the nearest point to the path
-        path.append(nearest)
-        # Update the current point
-        current_point = nearest
-        # Mark the visited point so it's not revisited
-        dist_matrix[:, current_point] = np.inf
-
-    # Return the ordered path indices and the corresponding points
-    ordered_points = points[path]
-    return ordered_points
 
 
 def get_ordered_closed_region(points, logx=False, logy=False):
@@ -277,59 +164,6 @@ def get_ordered_closed_region(points, logx=False, logy=False):
     return x_new, y_new
 
 
-def interp_grid(
-    x,
-    y,
-    z,
-    fine_gridx=False,
-    fine_gridy=False,
-    logx=False,
-    logy=False,
-    method="interpolate",
-    smear_stddev=False,
-):
-    # default
-    if not fine_gridx:
-        fine_gridx = 100
-    if not fine_gridy:
-        fine_gridy = 100
-
-    # log scale x
-    if logx:
-        xi = np.geomspace(np.min(x), np.max(x), fine_gridx)
-    else:
-        xi = np.linspace(np.min(x), np.max(x), fine_gridx)
-
-    # log scale y
-    if logy:
-        yi = np.geomspace(np.min(y), np.max(y), fine_gridy)
-    else:
-        yi = np.linspace(np.min(y), np.max(y), fine_gridy)
-
-    Xi, Yi = np.meshgrid(xi, yi)
-    # if logy:
-    #     Yi = 10**(-Yi)
-
-    # triangulation
-    if method == "triangulation":
-        triang = tri.Triangulation(x, y)
-        interpolator = tri.LinearTriInterpolator(triang, z)
-        Zi = interpolator(Xi, Yi)
-
-    elif method == "interpolate":
-        Zi = scipy.interpolate.griddata(
-            (x, y), z, (xi[None, :], yi[:, None]), method="linear", rescale=True
-        )
-    else:
-        print(f"Method {method} not implemented.")
-
-    # gaussian smear -- not recommended
-    if smear_stddev:
-        Zi = scipy.ndimage.filters.gaussian_filter(
-            Zi, smear_stddev, mode="nearest", order=0, cval=0
-        )
-
-    return Xi, Yi, Zi
 
 
 def round_sig(x, sig):
@@ -389,19 +223,13 @@ def lighten_color(color, amount=0.5):
     """
     try:
         c = mc.cnames[color]
-    except:
+    except KeyError:
         c = color
     c = colorsys.rgb_to_hls(*mc.to_rgb(c))
     return colorsys.hls_to_rgb(c[0], 1 - amount * (1 - c[1]), c[2])
 
 
 ###########################
-def get_cmap_colors(name, ncolors, cmin=0, cmax=1, reverse=False):
-    try:
-        cmap = plt.get_cmap(name)
-    except ValueError:
-        cmap = build_cmap(name, reverse=reverse)
-    return cmap(np.linspace(cmin, cmax, ncolors, endpoint=True))
 
 
 def build_cmap(color, reverse=False):
@@ -422,25 +250,3 @@ class MulticolorPatch(object):
 
 
 # define a handler for the MulticolorPatch object
-class MulticolorPatchHandler(object):
-    def legend_artist(self, legend, orig_handle, fontsize, handlebox):
-        width, height = handlebox.width, handlebox.height
-        patches = []
-        for i, c in enumerate(orig_handle.colors):
-            patches.append(
-                plt.Rectangle(
-                    [
-                        width / len(orig_handle.colors) * i - handlebox.xdescent,
-                        -handlebox.ydescent,
-                    ],
-                    width / len(orig_handle.colors),
-                    height,
-                    facecolor=c,
-                    edgecolor="none",
-                )
-            )
-
-        patch = PatchCollection(patches, match_original=True)
-
-        handlebox.add_artist(patch)
-        return patch
