@@ -1,10 +1,10 @@
 [build-system]
-requires = ["setuptools>=77", "wheel"]
+requires = ["setuptools>=77", "setuptools-scm>=8", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "mint-muc"
-version = "0.3.0"
+dynamic = ["version"]
 description = "Muon Induced Neutrino Tool (MINT): neutrino fluxes for muon facilities"
 readme = "README.md"
 license = "MIT"
@@ -12,6 +12,7 @@ license-files = ["LICENSE"]
 requires-python = ">=3.10"
 authors = [
   { name = "Matheus Hostert", email = "matheus-hostert@uiowa.edu" },
+  { name = "Joel Choi" },
 ]
 keywords = ["physics", "neutrino", "muon", "collider", "simulation"]
 classifiers = [
@@ -38,6 +39,8 @@ dev = [
   "twine>=6.1",
   "ruff>=0.4",
   "jupyter",
+  "pytest>=8",
+  "pytest-cov>=5",
 ]
 # The in-house CT18 cross-section backend (mint.lo_dis / use_backend("ct18"))
 ct18 = [
@@ -52,9 +55,14 @@ examples = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/mhostert/MINT"
-Repository = "https://github.com/mhostert/MINT"
-Issues = "https://github.com/mhostert/MINT/issues"
+Homepage = "https://github.com/jchoi55/MINT"
+Repository = "https://github.com/jchoi55/MINT"
+Issues = "https://github.com/jchoi55/MINT/issues"
+
+[tool.setuptools_scm]
+version_file = "mint/_version.py"
+# A tarball with no git metadata still needs a version to install with.
+fallback_version = "0.3.0"
 
 [tool.setuptools]
 include-package-data = true
@@ -78,4 +86,25 @@ target-version = "py310"
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "NPY"]
-ignore = ["E501"]
+ignore = [
+  "E501",    # line length is handled by the formatter, not the linter
+  # Legacy np.random.* calls in the event generator. Moving to a Generator
+  # would change the random stream, and therefore every published number, so
+  # it is deliberately deferred to a release where results are regenerated.
+  "NPY002",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+filterwarnings = ["ignore::PendingDeprecationWarning"]
+
+[tool.coverage.run]
+source = ["mint"]
+omit = ["mint/_version.py"]
+
+[tool.coverage.report]
+exclude_also = [
+  "if TYPE_CHECKING:",
+  "raise NotImplementedError",
+  "if __name__ == .__main__.:",
+]

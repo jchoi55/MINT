@@ -230,7 +230,7 @@ def cc_nonisoscalar_correction(Enu, nuflavor, Z, A):
     (weaker d/u coupling asymmetry) and are neglected.
     """
     Enu = np.asarray(Enu, float)
-    if "bar" in nuflavor:
+    if _is_antineutrino(nuflavor):
         sp, sn = _alf_sigma_CC_p_nubar(Enu), _alf_sigma_CC_n_nubar(Enu)
     else:
         sp, sn = _alf_sigma_CC_p_nu(Enu), _alf_sigma_CC_n_nu(Enu)
@@ -307,7 +307,7 @@ def sigma_charm_CC(Enu, nuflavor="numubar"):
     """Charm-production CC cross section per nucleon [cm^2], flavour-dispatched.
     Mirrors :func:`sigma_CC`; use this rather than re-implementing the
     nu/nubar branch at each call site."""
-    return (sigma_charm_CC_nubar(Enu) if "bar" in nuflavor
+    return (sigma_charm_CC_nubar(Enu) if _is_antineutrino(nuflavor)
             else sigma_charm_CC_nu(Enu))
 
 
@@ -342,11 +342,32 @@ def sigma_NC_nubar(Enu):
     return 0.36 * _alf_sigma_lightquark_CC_nubar(Enu)
 
 
+#: Flavor labels understood throughout MINT.
+NU_FLAVORS = ("numu", "numubar", "nue", "nuebar", "nutau", "nutaubar")
+
+
+def _is_antineutrino(nuflavor):
+    """True for an antineutrino label, raising on anything unrecognised.
+
+    Dispatching on ``"bar" in nuflavor`` alone silently sends a typo down the
+    neutrino branch and returns a plausible but wrong number, so the label is
+    validated first.
+    """
+    if nuflavor not in NU_FLAVORS:
+        raise ValueError(
+            f"unknown neutrino flavor {nuflavor!r}; expected one of {NU_FLAVORS}")
+    return nuflavor.endswith("bar")
+
+
 def sigma_CC(Enu, nuflavor="numubar"):
     """Total SM CC DIS cross section per nucleon [cm^2] (isoscalar;
-    light + charm + bottom), nu vs nubar picked from the flavor label."""
+    light + charm + bottom), nu vs nubar picked from the flavor label.
+
+    Note that ``nutau``/``nutaubar`` are returned *without* the tau-mass
+    threshold suppression; use :func:`sigma_nutau_CC` for those.
+    """
     Enu = np.asarray(Enu, float)
-    if "bar" in nuflavor:
+    if _is_antineutrino(nuflavor):
         return (sigma_lightquark_CC_nubar(Enu) + sigma_charm_CC_nubar(Enu)
                 + sigma_bottom_CC_nubar(Enu))
     return (sigma_lightquark_CC_nu(Enu) + sigma_charm_CC_nu(Enu)

@@ -1,5 +1,10 @@
 # Muon Induced Neutrino Tool (MINT)
 
+[![tests](https://github.com/jchoi55/MINT/actions/workflows/tests.yml/badge.svg)](https://github.com/jchoi55/MINT/actions/workflows/tests.yml)
+[![codecov](https://codecov.io/gh/jchoi55/MINT/branch/main/graph/badge.svg)](https://codecov.io/gh/jchoi55/MINT)
+[![python](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12-blue)](https://github.com/jchoi55/MINT)
+[![license](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+
 <img src="assets/mint-logo.svg" alt="MINT logo" width="120" />
 
 Neutrino fluxes at muon facilities — muon colliders, neutrino factories, and
@@ -105,18 +110,27 @@ ring = mint.lattices.load("mc_10tev_hybrid_v06", total_circumference=10e5)  # cm
 
 ```bash
 pip install -e ".[dev]"
-pytest tests/
+pytest                    # the suite
+pytest --cov=mint         # with a coverage report
 ```
+
+Every push runs the suite on Python 3.10, 3.11 and 3.12, plus a `ruff` lint
+pass. See `.github/workflows/tests.yml`.
 
 These check the properties the physics leans on: that the beam normalization
 closes including muon survival in the store, that the Courant–Snyder envelopes
 are self-consistent, that the detector column densities are what the rates
 assume, and that the cross-section backends agree.
 
+## Authors
+
+Matheus Hostert and Joel Choi.
+
 ## Citation
 
-If you use MINT, please cite the accompanying paper. See `physics-examples/` for
-the studies it reports.
+If you use MINT, please cite the accompanying paper, and the software itself via
+`CITATION.cff` (GitHub's "Cite this repository" button renders it). The studies
+the paper reports are in `physics-examples/`.
 
 ## Building distributions
 

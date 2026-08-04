@@ -1,0 +1,25 @@
+cff-version: 1.2.0
+title: "MINT: the Muon Induced Neutrino Tool"
+message: "If you use MINT in your research, please cite it as below."
+type: software
+authors:
+  - family-names: Hostert
+    given-names: Matheus
+    email: matheus-hostert@uiowa.edu
+    affiliation: University of Iowa
+  - family-names: Choi
+    given-names: Joel
+repository-code: "https://github.com/jchoi55/MINT"
+url: "https://github.com/jchoi55/MINT"
+abstract: >-
+  MINT simulates neutrino fluxes at muon facilities. It decays muons along a
+  realistic accelerator lattice, taken from a MAD-X TWISS table, keeping the
+  beam optics, muon polarization, and NLO decay corrections, and propagates the
+  resulting neutrinos to a detector.
+keywords:
+  - physics
+  - neutrino
+  - muon collider
+  - simulation
+license: MIT
+version: 0.3.0

@@ -26,3 +26,6 @@ physics-examples/plots/
 
 # On-disk caches built on first run
 **/.dn_*_cache.npz
+
+# setuptools-scm writes the version here at build time
+mint/_version.py

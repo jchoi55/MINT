@@ -2,7 +2,6 @@ import shutil
 
 from cycler import cycler
 import numpy as np
-from scipy.stats import chi2
 
 from math import log10, floor, erf
 
@@ -11,12 +10,9 @@ import colorsys
 import matplotlib.colors as mc
 import matplotlib.pyplot as plt
 from matplotlib import rc, rcParams
-import matplotlib.tri as tri
 from scipy.spatial.distance import pdist, squareform
 from matplotlib import colors as mpl_colors
-from matplotlib.collections import PatchCollection
 
-import scipy
 
 ###########################
 fsize = 11

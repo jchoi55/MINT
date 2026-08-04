@@ -22,7 +22,6 @@ annual rates. Need more statistics? Pass ``n_evals`` (the vegas sample size)
 all flavors of both beams obtained from it by exact reweighting.
 """
 
-import numpy as np
 
 from mint import const
 from mint import lattices

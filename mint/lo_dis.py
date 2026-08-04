@@ -123,7 +123,6 @@ def compute_tables(pdf_name="CT18NNLO", member=0, E_grid=None,
         "bottom_nubar": (0.0 * X, u_b * V2["ub"] + c_b * V2["cb"]),
     }
     # NC: nu has (gL^2 q + gR^2 qbar) flat and (gR^2 q + gL^2 qbar) (1-y)^2
-    gu2, gub2 = _GLu**2 + 0 * X, _GRu**2 + 0 * X
     up_q, up_qb = Dq + c, Dqb + cb            # up-type: u (+charm at xi_c)
     dn_q, dn_qb = Dq + s, Dqb + sb            # down-type: d + s (b negligible)
     NC_nu_flat = (_GLu**2 * up_q + _GRu**2 * up_qb
