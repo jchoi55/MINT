@@ -172,3 +172,43 @@ def test_read_tfs_matches_the_loaded_lattice(ring):
     assert len(df) > 100
     assert {"S", "BETX", "BETY", "ALFX", "ALFY"} <= set(df.columns)
     assert df["S"].max() == pytest.approx(float(ring.s(1)) / const.m_to_cm, rel=1e-3)
+
+
+@pytest.mark.parametrize("name", list(mint.lattices.available()))
+def test_every_shipped_lattice_builds_a_usable_beam(name):
+    """Every registered lattice must load and give physical envelopes.
+
+    Guards the packaged data as much as the code: a truncated or mislabelled
+    TWISS file shows up here rather than as a silently wrong flux.
+    """
+    r = mint.lattices.load(name)
+    u = np.linspace(0, 1, 500, endpoint=False)
+    assert float(r.s(1)) > 0
+    assert np.all(r.betx(u) > 0) and np.all(r.bety(u) > 0)
+    assert np.all(np.isfinite(r.beamsize_x(u)))
+    p0 = float(r.beam_p0(0.0))
+    assert 1.0 < p0 < 1e5, f"{name}: implausible beam momentum {p0} GeV"
+
+
+def test_the_two_collider_energies_are_distinct():
+    """The 3 and 10 TeV rings must not silently be the same machine."""
+    three = mint.lattices.load("mc_3tev_v1.2")
+    ten = mint.lattices.load("mc_10tev_ring_v06")
+    assert float(three.beam_p0(0.0)) == pytest.approx(1500.0, rel=0.02)
+    assert float(ten.beam_p0(0.0)) == pytest.approx(5000.0, rel=0.02)
+    assert float(three.s(1)) < float(ten.s(1))
+
+
+def test_compressed_and_plain_tfs_read_identically(tmp_path):
+    """read_tfs must handle .tfs.gz transparently."""
+    import gzip
+    import shutil
+    src = mint.lattices.path("mc_3tev_v1.2")
+    assert src.endswith(".gz"), "shipped lattices are stored compressed"
+    plain = tmp_path / "ring.tfs"
+    with gzip.open(src, "rb") as fi, open(plain, "wb") as fo:
+        shutil.copyfileobj(fi, fo)
+    a = mint.lattices.read_tfs(src)
+    b = mint.lattices.read_tfs(str(plain))
+    assert len(a) == len(b)
+    assert np.allclose(a["S"].to_numpy(), b["S"].to_numpy())

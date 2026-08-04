@@ -2,8 +2,6 @@
 
 [![tests](https://github.com/jchoi55/MINT/actions/workflows/tests.yml/badge.svg)](https://github.com/jchoi55/MINT/actions/workflows/tests.yml)
 [![codecov](https://codecov.io/gh/jchoi55/MINT/branch/main/graph/badge.svg)](https://codecov.io/gh/jchoi55/MINT)
-[![python](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12-blue)](https://github.com/jchoi55/MINT)
-[![license](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
 <img src="assets/mint-logo.svg" alt="MINT logo" width="120" />
 
@@ -87,6 +85,22 @@ ring:
 ```python
 ring = mint.lattices.load("mc_10tev_hybrid_v06", total_circumference=10e5)  # cm
 ```
+
+## Lattices shipped with MINT
+
+`mint.lattices.available()` lists these; `load()` takes the name.
+
+| Name | Machine | Ring length | Beam energy | Notes |
+| --- | --- | --- | --- | --- |
+| `mc_10tev_hybrid_v06` | 10 TeV MuC | 1.5 km covered | 5 TeV | Default. Interaction region only, hybrid v06; the arcs are accounted for through `total_circumference = 10 km`, so muons age over the full machine while decays are placed on the covered section. |
+| `mc_10tev_ring_v06` | 10 TeV MuC | 8.7 km | 5 TeV | The full v06 ring, arcs included, so no `total_circumference` override is needed. |
+| `mc_10tev_IR_v09` | 10 TeV MuC | 0.6 km covered | 5 TeV | Interaction region only, v09. |
+| `mc_3tev_v1.2` | 3 TeV MuC | 4.3 km | 1.5 TeV | The full 3 TeV ring, design v1.2. |
+
+The tables are MAD-X TWISS output, stored gzip-compressed (they are repetitive
+text and shrink by ~96%); `read_tfs` decompresses transparently. Bring your own
+with `mint.lattices.from_tfs("my_ring.tfs", emittance_RMS=...)` — plain or
+gzipped, both work.
 
 ## Repository layout
 

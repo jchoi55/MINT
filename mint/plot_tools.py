@@ -3,7 +3,7 @@ import shutil
 from cycler import cycler
 import numpy as np
 
-from math import log10, floor, erf
+from math import log10, floor
 
 import matplotlib
 import colorsys
@@ -11,7 +11,6 @@ import matplotlib.colors as mc
 import matplotlib.pyplot as plt
 from matplotlib import rc, rcParams
 from scipy.spatial.distance import pdist, squareform
-from matplotlib import colors as mpl_colors
 
 
 ###########################
@@ -58,16 +57,6 @@ plt.rcParams["axes.prop_cycle"] = cycler(color=cblind_safe_wheel)
 
 ##########################
 #
-def get_CL_from_sigma(sigma):
-    return erf(sigma / np.sqrt(2))
-
-
-
-
-
-
-
-
 def std_fig(ax_form=std_axes_form, figsize=std_figsize, rasterized=False):
     fig = plt.figure(figsize=figsize)
     ax = fig.add_axes(ax_form, rasterized=rasterized)
@@ -226,17 +215,6 @@ def lighten_color(color, amount=0.5):
 
 
 ###########################
-
-
-def build_cmap(color, reverse=False):
-    cvals = [0, 1]
-    colors = [color, "white"]
-    if reverse:
-        colors = colors[::-1]
-
-    norm = plt.Normalize(min(cvals), max(cvals))
-    tuples = list(zip(map(norm, cvals), colors))
-    return mpl_colors.LinearSegmentedColormap.from_list("", tuples)
 
 
 # define an object that will be used by the legend

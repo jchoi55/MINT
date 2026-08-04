@@ -1,6 +1,7 @@
 import pandas as pd
+import gzip
+
 import numpy as np
-import matplotlib.patches as patches
 from scipy.interpolate import interp1d
 
 from mint import const
@@ -612,14 +613,6 @@ def create_RLA_lattice(
 
 
 
-def get_gyro_radius(E, B):
-    return 3.3e2 * E / B  # cm (E in GeV, B in T)
-
-
-def get_dtheta(s, R):
-    return s / R
-
-
 def advance_in_pos_and_momentum(x0, y0, px0, py0, dtheta, ds):
     # r = np.sqrt(x0**2 + y0**2)
     theta_p = np.arctan2(py0, px0)
@@ -739,13 +732,18 @@ def create_lattice_dict_from_vertices(vertices, n_elements=None):
 
 
 def get_lattice_dataframe_from_tfs(filename):
-    # Initialize lists to store metadata and column data
+    """Read a MAD-X TFS/TWISS table into a DataFrame.
+
+    Accepts plain ``.tfs`` files or gzip-compressed ``.tfs.gz``; TWISS tables
+    are highly repetitive text and compress by ~96%, which is why the shipped
+    lattices are stored compressed.
+    """
     metadata = {}
     columns = []
     data = []
 
-    # Open and read file
-    with open(filename, "r") as file:
+    opener = gzip.open if str(filename).endswith(".gz") else open
+    with opener(filename, "rt") as file:
         for line in file:
             # Extract metadata lines
             if line.startswith("@"):
@@ -834,113 +832,8 @@ def get_lattice_dataframe_from_tfs(filename):
     return df
 
 
-def plot_lattice(df):
-    fig, ax = pt.std_fig(figsize=(10, 5))
-    # ax.set_xlim(-220, 0)
-    # ax.set_xlim(125, 150)
-    # ax.set_ylim(-11, 11)
-    # ax.scatter(df['x'][~df['bending_magnet']], df['y'][~df['bending_magnet']], marker='|', s=200, color='darkorange', zorder=2)
-    # ax.scatter(df['x'][df['bending_magnet']], df['y'][df['bending_magnet']], marker='x', s=200, color='dodgerblue', zorder=2)
-    ax.plot(df["x"], df["y"], linewidth=0.5, c="black")
-
-    rect = patches.Rectangle(
-        (-6, -6),
-        12,
-        12,
-        linewidth=2,
-        edgecolor="black",
-        facecolor="None",
-        hatch="///////",
-    )
-    ax.add_patch(rect)
-
-    # Minimum size of linear step
-    ds = 0.1
-    # How tall is the magnet for x-y plane
-    magnet_thickness = 1
-    n_elements = df.index.size
-    ds = 0.1
-    # for i in list(range(1,100))+list(range(n_elements-100,n_elements)):
-    for i in list(range(n_elements - 400, n_elements)):
-        x, y, s = df["x"][i], df["y"][i], df["L"][i]
-        px, py = df["px"][i], df["py"][i]
-        dtheta = df["ANGLE"][i]
-        # theta_p = np.arctan2(py, px)
-        # r_arc = s / dtheta
-
-        if df["L"][i] > 0:
-            n_discrete_bend = max(int(s / ds), 30)
-            x0, y0, px0, py0 = x, y, px, py
-            for j in range(n_discrete_bend):
-                xn, yn, pxn, pyn = advance_in_pos_and_momentum(
-                    x0, y0, px0, py0, dtheta / n_discrete_bend, s / n_discrete_bend
-                )
-                theta_pn = np.arctan2(pyn, pxn)
-
-                if df["KEYWORD"][i] == "SBEND" or df["KEYWORD"][i] == "RBEND":
-                    rect = patches.Rectangle(
-                        (x0, y0 - magnet_thickness * np.cos(theta_pn) / 2),
-                        width=s / n_discrete_bend,
-                        height=magnet_thickness,
-                        angle=theta_pn * 180 / np.pi,
-                        linewidth=0.5,
-                        edgecolor="dodgerblue",
-                        facecolor="dodgerblue",
-                        zorder=0.5,
-                        alpha=1,
-                    )
-                elif (
-                    df["KEYWORD"][i] == "QUADRUPOLE"
-                    or df["KEYWORD"][i] == "MULTIPOLE"
-                    or df["KEYWORD"][i] == "RCOLLIMATOR"
-                ):
-                    rect = patches.Rectangle(
-                        (x0, y0 - magnet_thickness * np.cos(theta_pn) / 2),
-                        width=s / n_discrete_bend,
-                        height=magnet_thickness,
-                        angle=theta_pn * 180 / np.pi,
-                        linewidth=0.5,
-                        edgecolor="orange",
-                        facecolor="orange",
-                        zorder=0.51,
-                        alpha=1,
-                    )
-                elif df["KEYWORD"][i] == "DRIFT":
-                    rect = patches.Rectangle(
-                        (x0, y0 - magnet_thickness * np.cos(theta_pn) / 2),
-                        width=s / n_discrete_bend,
-                        height=magnet_thickness,
-                        angle=theta_pn * 180 / np.pi,
-                        linewidth=0.5,
-                        edgecolor="lightgrey",
-                        facecolor="lightgrey",
-                        zorder=0.5,
-                        alpha=1,
-                    )
-
-                ax.add_patch(rect)
-                x0, y0, px0, py0 = xn, yn, pxn, pyn
-
-    ax.set_ylim(df["y"].min(), 10)
-    ax.set_xlim(df["x"].min(), 0)
-
-    ax.set_xlabel("x [cm]")
-    ax.set_ylabel("y [cm]")
-
-    # if df['KEYWORD'][i] == 'DRIFT':
-    # ax.plot([x, x+s*np.cos(theta_p)], [y, y+s*np.sin(theta_p)], color='black', linewidth=2)
-
-    fig.savefig(
-        f'plots/beam_optics/lattice_{df.attrs["ENERGY"]}_trajectory.pdf',
-        dpi=500,
-        bbox_inches="tight",
-    )
-
 # ==========================================================================
-# Smoothed-lattice construction (moved here from the former
-# mint/beam_optics.py, whose other contents were byte-identical copies of
-# get_gyro_radius / get_dtheta / advance_in_pos_and_momentum above, a
-# second plot_lattice, and a dead truncated variant).
+# Smoothed-lattice construction: MAD-X TWISS table -> beam envelopes
 # ==========================================================================
 
 def _unwrap_phase(phi: np.ndarray) -> np.ndarray:

@@ -28,6 +28,8 @@ from mint import lattice_tools
 # Geometric RMS emittance used in the 10 TeV MuC studies: normalized emittance
 # of 25 um-rad divided by the relativistic gamma of a 5 TeV muon (~0.105 GeV mass).
 _EMITTANCE_RMS_10TEV = 25e-6 / (5e3 / 0.105)  # [m rad]
+# 3 TeV design: same 25 um normalized emittance, lower relativistic gamma.
+_EMITTANCE_RMS_3TEV = 25e-6 / (1.5e3 / 0.105)  # [m rad]
 
 #: Registry of lattices shipped with MINT. Each entry maps a short name to the
 #: packaged TFS/TWISS file, the default smoothing settings, and the default
@@ -66,6 +68,34 @@ REGISTRY = {
         "total_circumference": 10e5,
         "beamdiv_z": 1.0e-3,
         "beamsize_z": 0.15,
+    },
+    "mc_10tev_ring_v06": {
+        "file": "ring_v06.tfs.gz",
+        "description": (
+            "10 TeV muon collider, the FULL 8.7 km ring, design v06 "
+            "(arcs included, so no total_circumference override is needed)"
+        ),
+        "emittance_RMS": _EMITTANCE_RMS_10TEV,
+        "Nmu_per_bunch": 2e12,
+        "finj": 5.0,
+        "bunch_multiplicity": 1.0,
+        "duty_factor": 1 / np.pi,
+        "beamdiv_z": 1.0e-3,
+        "beamsize_z": 0.15,
+    },
+    "mc_3tev_v1.2": {
+        "file": "mc3tev_v1.2.tfs.gz",
+        "description": (
+            "3 TeV muon collider, the full 4.3 km ring, design v1.2 "
+            "(1.5 TeV per beam)"
+        ),
+        "emittance_RMS": _EMITTANCE_RMS_3TEV,
+        "Nmu_per_bunch": 2.2e12,
+        "finj": 5.0,
+        "bunch_multiplicity": 1.0,
+        "duty_factor": 1 / np.pi,
+        "beamdiv_z": 1.0e-3,
+        "beamsize_z": 0.5,
     },
 }
 
