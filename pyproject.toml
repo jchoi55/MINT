@@ -12,7 +12,7 @@ license-files = ["LICENSE"]
 requires-python = ">=3.10"
 authors = [
   { name = "Matheus Hostert", email = "matheus-hostert@uiowa.edu" },
-  { name = "Joel Choi" },
+  { name = "Joel Choi", email = "joel-choi@uiowa.edu" },
 ]
 keywords = ["physics", "neutrino", "muon", "collider", "simulation"]
 classifiers = [
