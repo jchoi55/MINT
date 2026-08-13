@@ -23,14 +23,13 @@ To describe your own detector, build a :class:`Detector` with your own module
 list rather than subclassing -- see ``MINT_examples/benchmark_detector.ipynb``.
 """
 
-
 from dataclasses import dataclass
 
 import numpy as np
 
 from mint import detector_tools as dt
 
-M_MU = 0.1056583755          # GeV
+M_MU = 0.1056583755  # GeV
 
 # Everything upstream of the calorimeter: the region in which an interaction
 # can be reconstructed rather than merely absorbed.
@@ -102,8 +101,8 @@ class Detector:
 
     # ---- fixed layout constants [cm] --------------------------------------
     Z_HALO0, Z_HALO1 = 0.0, 200.0
-    Z_VTX0 = 200.0               # vertex tracker starts here; its length is
-    Z_DRIFT1 = 1200.0            # n_plates x plate_pitch. Air out to Z_DRIFT1.
+    Z_VTX0 = 200.0  # vertex tracker starts here; its length is
+    Z_DRIFT1 = 1200.0  # n_plates x plate_pitch. Air out to Z_DRIFT1.
     Z_TPC0, Z_TPC1 = 1200.0, 5200.0
     N_TPC_MODULES = 4
     TPC_MODULE_LEN = 950.0
@@ -111,23 +110,38 @@ class Detector:
     Z_CALO0, Z_CALO1 = 5250.0, 5550.0
     Z_MUON0, Z_MUON1 = 5550.0, 7550.0
 
-    HALO_COLUMN = 0.4            # g/cm^2 of tracker material on the front face
-    VESSEL_X0 = 0.20             # radiation lengths per internal TPC boundary
-    ENDCAP_X0 = 0.30             # radiation lengths of the downstream end cap
-    CALO_R_FLOOR = 300.0         # calorimeter / spectrometer minimum half-width
+    HALO_COLUMN = 0.4  # g/cm^2 of tracker material on the front face
+    VESSEL_X0 = 0.20  # radiation lengths per internal TPC boundary
+    ENDCAP_X0 = 0.30  # radiation lengths of the downstream end cap
+    CALO_R_FLOOR = 300.0  # calorimeter / spectrometer minimum half-width
     HALO_RADIUS = 200.0
 
     # EM: 40 x (2.8 mm W + 0.5 mm Si + 3 mm gap); HAD: 84 x (2 cm Fe + 1 cm sc)
     EM_LAYERS, EM_W, EM_SI, EM_GAP = 40, 0.28, 0.05, 0.30
     HAD_LAYERS, HAD_FE, HAD_SC = 84, 2.0, 1.0
 
-    def __init__(self, name="benchmark_5km", dist=5e5, n_sigma=2.5,
-                 theta_acc=15e-3, sigma_div=1.0e-4, E_beam=5000.0,
-                 gap=1000.0, rock=None, rock_start=250e2,
-                 n_plates=24, plate_pitch=5.0, foil_mat=None, foil_thick=0.2,
-                 si_thick=0.015, r_vertex_max=50.0,
-                 n_sparse=4, sparse_thick=0.03,
-                 tpc_pressure_bar=5.0, vessel_mat=None):
+    def __init__(
+        self,
+        name="benchmark_5km",
+        dist=5e5,
+        n_sigma=2.5,
+        theta_acc=15e-3,
+        sigma_div=1.0e-4,
+        E_beam=5000.0,
+        gap=1000.0,
+        rock=None,
+        rock_start=250e2,
+        n_plates=24,
+        plate_pitch=5.0,
+        foil_mat=None,
+        foil_thick=0.2,
+        si_thick=0.015,
+        r_vertex_max=50.0,
+        n_sparse=4,
+        sparse_thick=0.03,
+        tpc_pressure_bar=5.0,
+        vessel_mat=None,
+    ):
         self.name = name
         self.dist = float(dist)
         self.n_sigma = float(n_sigma)
@@ -170,16 +184,17 @@ class Detector:
         # stack exactly while placing vertices uniformly along z
         f_foil = self.foil_thick / self.plate_pitch
         f_si = self.si_thick / self.plate_pitch
-        self.vertex_mat = dt.CompositMaterial([[self.foil_mat, f_foil],
-                                               [dt.Si, f_si]])
+        self.vertex_mat = dt.CompositMaterial([[self.foil_mat, f_foil], [dt.Si, f_si]])
 
         # homogenised calorimeter mixtures (volume fractions)
         em_pitch = self.EM_W + self.EM_SI + self.EM_GAP
-        self.ecal_mat = dt.CompositMaterial([[dt.W, self.EM_W / em_pitch],
-                                             [dt.Si, self.EM_SI / em_pitch]])
+        self.ecal_mat = dt.CompositMaterial(
+            [[dt.W, self.EM_W / em_pitch], [dt.Si, self.EM_SI / em_pitch]]
+        )
         had_pitch = self.HAD_FE + self.HAD_SC
-        self.hcal_mat = dt.CompositMaterial([[dt.Fe, self.HAD_FE / had_pitch],
-                                             [dt.PS, self.HAD_SC / had_pitch]])
+        self.hcal_mat = dt.CompositMaterial(
+            [[dt.Fe, self.HAD_FE / had_pitch], [dt.PS, self.HAD_SC / had_pitch]]
+        )
         self.halo_mat = dt.PS
         self.modules = self._build_modules()
 
@@ -207,8 +222,9 @@ class Detector:
 
     def aperture(self, z):
         """Detector half-width [cm] at ``z`` cm from the front face."""
-        return (self.n_sigma * self.sigma_spot
-                + np.asarray(z, float) * np.tan(self.theta_acc))
+        return self.n_sigma * self.sigma_spot + np.asarray(z, float) * np.tan(
+            self.theta_acc
+        )
 
     @property
     def radius(self):
@@ -234,77 +250,179 @@ class Detector:
     def _tpc_module_edges(self):
         """[(z0, z1), ...] of the active gas modules, on a 10 m pitch."""
         pitch = self.TPC_MODULE_LEN + self.TPC_GAP
-        return [(self.Z_TPC0 + i * pitch, self.Z_TPC0 + i * pitch + self.TPC_MODULE_LEN)
-                for i in range(self.N_TPC_MODULES)]
+        return [
+            (self.Z_TPC0 + i * pitch, self.Z_TPC0 + i * pitch + self.TPC_MODULE_LEN)
+            for i in range(self.N_TPC_MODULES)
+        ]
 
     def _build_modules(self):
         mods = []
-        C = {"halo": "#8c8c8c", "target": "#3b6ea5", "si": "#6fa8dc",
-             "gas": "#c7e0b4", "vessel": "#b07aa1", "ecal": "#d1495b",
-             "hcal": "#8d6e4a", "air": "#eef2f6"}
+        C = {
+            "halo": "#8c8c8c",
+            "target": "#3b6ea5",
+            "si": "#6fa8dc",
+            "gas": "#c7e0b4",
+            "vessel": "#b07aa1",
+            "ecal": "#d1495b",
+            "hcal": "#8d6e4a",
+            "air": "#eef2f6",
+        }
 
         # -- 0. halo tagger: a thin tracking plane over the full face.
         # Not a target; sized to the rock-muon halo, hence the fixed 2 m radius
         # rather than the neutrino-cone aperture.
         t_halo = self.HALO_COLUMN / self.halo_mat.density
-        mods.append(Module("halo tagger", self.Z_HALO0, self.Z_HALO0 + t_halo,
-                           self.halo_mat, "tracker", "fixed", self.HALO_RADIUS,
-                           C["halo"], "0.4 g/cm2 fibre/gas tracking, full face"))
+        mods.append(
+            Module(
+                "halo tagger",
+                self.Z_HALO0,
+                self.Z_HALO0 + t_halo,
+                self.halo_mat,
+                "tracker",
+                "fixed",
+                self.HALO_RADIUS,
+                C["halo"],
+                "0.4 g/cm2 fibre/gas tracking, full face",
+            )
+        )
 
         # -- 1. vertex tracker: ONE homogenised slab of graphite + silicon,
         # radius capped at r_vertex_max so the silicon area stays affordable.
-        mods.append(Module("vertex tracker", self.Z_VTX0, self.Z_VTX1,
-                           self.vertex_mat, "vertex", "cap", self.r_vertex_max,
-                           C["target"],
-                           f"{self.n_plates} plates x ({self.foil_thick*10:.0f} mm C"
-                           f" + {self.si_thick*1e4:.0f} um Si) on a "
-                           f"{self.plate_pitch:.0f} cm pitch"))
+        mods.append(
+            Module(
+                "vertex tracker",
+                self.Z_VTX0,
+                self.Z_VTX1,
+                self.vertex_mat,
+                "vertex",
+                "cap",
+                self.r_vertex_max,
+                C["target"],
+                f"{self.n_plates} plates x ({self.foil_thick*10:.0f} mm C"
+                f" + {self.si_thick*1e4:.0f} um Si) on a "
+                f"{self.plate_pitch:.0f} cm pitch",
+            )
+        )
 
         # -- 1b. sparse tracker: n large-area Si layers across the drift
         if self.n_sparse > 0:
             span = self.Z_DRIFT1 - self.Z_VTX1
             for i in range(self.n_sparse):
                 z = self.Z_VTX1 + (i + 0.5) * span / self.n_sparse
-                mods.append(Module(f"sparse tracker {i}", z, z + self.sparse_thick,
-                                   dt.Si, "tracker", "cone", 0.0, C["si"],
-                                   f"{self.sparse_thick*1e4:.0f} um Si layer"))
+                mods.append(
+                    Module(
+                        f"sparse tracker {i}",
+                        z,
+                        z + self.sparse_thick,
+                        dt.Si,
+                        "tracker",
+                        "cone",
+                        0.0,
+                        C["si"],
+                        f"{self.sparse_thick*1e4:.0f} um Si layer",
+                    )
+                )
 
         # -- 2. TPC core: active gas modules separated by pressure-vessel walls
         edges = self._tpc_module_edges()
-        t_wall = self.VESSEL_X0 * dt.radiation_length(self.vessel_mat) \
+        t_wall = (
+            self.VESSEL_X0
+            * dt.radiation_length(self.vessel_mat)
             / self.vessel_mat.density
+        )
         for i, (za, zb) in enumerate(edges):
-            mods.append(Module(f"TPC module {i}", za, zb, self.gas, "gas",
-                               "cone", 0.0, C["gas"],
-                               f"{self.tpc_pressure_bar:.0f} bar Ar, "
-                               f"{(zb-za)/100:.1f} m"))
-            if i < len(edges) - 1:                      # internal boundary
+            mods.append(
+                Module(
+                    f"TPC module {i}",
+                    za,
+                    zb,
+                    self.gas,
+                    "gas",
+                    "cone",
+                    0.0,
+                    C["gas"],
+                    f"{self.tpc_pressure_bar:.0f} bar Ar, " f"{(zb-za)/100:.1f} m",
+                )
+            )
+            if i < len(edges) - 1:  # internal boundary
                 zc = 0.5 * (zb + edges[i + 1][0])
-                mods.append(Module(f"TPC wall {i}", zc - t_wall / 2,
-                                   zc + t_wall / 2, self.vessel_mat, "structure",
-                                   "cone", 0.0, C["vessel"],
-                                   f"{self.VESSEL_X0:.2f} X0 vessel wall"))
-        t_cap = self.ENDCAP_X0 * dt.radiation_length(self.vessel_mat) \
+                mods.append(
+                    Module(
+                        f"TPC wall {i}",
+                        zc - t_wall / 2,
+                        zc + t_wall / 2,
+                        self.vessel_mat,
+                        "structure",
+                        "cone",
+                        0.0,
+                        C["vessel"],
+                        f"{self.VESSEL_X0:.2f} X0 vessel wall",
+                    )
+                )
+        t_cap = (
+            self.ENDCAP_X0
+            * dt.radiation_length(self.vessel_mat)
             / self.vessel_mat.density
-        mods.append(Module("TPC end cap", self.Z_TPC1 - t_cap, self.Z_TPC1,
-                           self.vessel_mat, "structure", "cone", 0.0,
-                           C["vessel"], f"{self.ENDCAP_X0:.2f} X0 end cap"))
+        )
+        mods.append(
+            Module(
+                "TPC end cap",
+                self.Z_TPC1 - t_cap,
+                self.Z_TPC1,
+                self.vessel_mat,
+                "structure",
+                "cone",
+                0.0,
+                C["vessel"],
+                f"{self.ENDCAP_X0:.2f} X0 end cap",
+            )
+        )
 
         # -- 3. calorimeter (homogenised: MINT never resolves shower layers)
         z_em1 = self.Z_CALO0 + self.EM_LAYERS * (self.EM_W + self.EM_SI + self.EM_GAP)
-        mods.append(Module("ECAL", self.Z_CALO0, z_em1, self.ecal_mat, "absorber",
-                           "floor", self.CALO_R_FLOOR, C["ecal"],
-                           f"{self.EM_LAYERS} x (W/Si), 32 X0"))
+        mods.append(
+            Module(
+                "ECAL",
+                self.Z_CALO0,
+                z_em1,
+                self.ecal_mat,
+                "absorber",
+                "floor",
+                self.CALO_R_FLOOR,
+                C["ecal"],
+                f"{self.EM_LAYERS} x (W/Si), 32 X0",
+            )
+        )
         z_h0 = z_em1 + 5.0
         z_h1 = z_h0 + self.HAD_LAYERS * (self.HAD_FE + self.HAD_SC)
-        mods.append(Module("HCAL", z_h0, z_h1, self.hcal_mat, "absorber",
-                           "floor", self.CALO_R_FLOOR, C["hcal"],
-                           f"{self.HAD_LAYERS} x (Fe/scint), 10 lambda_I"))
+        mods.append(
+            Module(
+                "HCAL",
+                z_h0,
+                z_h1,
+                self.hcal_mat,
+                "absorber",
+                "floor",
+                self.CALO_R_FLOOR,
+                C["hcal"],
+                f"{self.HAD_LAYERS} x (Fe/scint), 10 lambda_I",
+            )
+        )
 
         # -- 4. muon spectrometer: air-core dipole, tracking stations only
-        mods.append(Module("muon spectrometer", self.Z_MUON0, self.Z_MUON1,
-                           dt.Air, "air", "floor", self.CALO_R_FLOOR, C["air"],
-                           "air-core dipole, 0.5 T over 20 m"))
+        mods.append(
+            Module(
+                "muon spectrometer",
+                self.Z_MUON0,
+                self.Z_MUON1,
+                dt.Air,
+                "air",
+                "floor",
+                self.CALO_R_FLOOR,
+                C["air"],
+                "air-core dipole, 0.5 T over 20 m",
+            )
+        )
         return mods
 
     @property
@@ -324,11 +442,10 @@ class Detector:
         cone through the two end points.
         """
         D = self.dist if dist is None else dist
-        scale = D / self.dist                      # spot size scales with L
+        scale = D / self.dist  # spot size scales with L
 
         def r_at(z):
-            return (self.n_sigma * self.sigma_spot * scale
-                    + z * np.tan(self.theta_acc))
+            return self.n_sigma * self.sigma_spot * scale + z * np.tan(self.theta_acc)
 
         z0, z1 = mod.z0, mod.z1
         if mod.aperture == "fixed":
@@ -337,7 +454,7 @@ class Detector:
             return [(z0, z1, float(r_at(z0)), float(r_at(z1)))]
         ra, rb = float(r_at(z0)), float(r_at(z1))
         F = mod.r_ref
-        if mod.aperture == "cap":                  # min(R(z), r_ref)
+        if mod.aperture == "cap":  # min(R(z), r_ref)
             if ra >= F:
                 return [(z0, z1, F, F)]
             if rb <= F:
@@ -363,21 +480,30 @@ class Detector:
         for m in self.modules:
             if kinds is not None and m.kind not in kinds:
                 continue
-            for (a, b, r0, r1) in self._segments(m, dist=D):
+            for a, b, r0, r1 in self._segments(m, dist=D):
                 if b <= a:
                     continue
-                out.append(dt.ConeVolume(m.material, z0=sign * D + sign * a,
-                                         z1=sign * D + sign * b, r0=r0, r1=r1,
-                                         name=m.name)
-                           if sign > 0 else
-                           dt.ConeVolume(m.material, z0=-(D + b), z1=-(D + a),
-                                         r0=r1, r1=r0, name=m.name))
+                out.append(
+                    dt.ConeVolume(
+                        m.material,
+                        z0=sign * D + sign * a,
+                        z1=sign * D + sign * b,
+                        r0=r0,
+                        r1=r1,
+                        name=m.name,
+                    )
+                    if sign > 0
+                    else dt.ConeVolume(
+                        m.material, z0=-(D + b), z1=-(D + a), r0=r1, r1=r0, name=m.name
+                    )
+                )
         return out
 
     def detector(self, sign=+1, dist=None, kinds=None):
         """A :class:`mint.detector_tools.VolumeStack` over the module stack."""
-        return dt.VolumeStack(self.volumes(sign=sign, dist=dist, kinds=kinds),
-                           name=self.name)
+        return dt.VolumeStack(
+            self.volumes(sign=sign, dist=dist, kinds=kinds), name=self.name
+        )
 
     def fiducial_volumes(self, sign=+1, dist=None):
         """Active TPC gas cones -- the DECAY volume for long-lived states."""
@@ -390,11 +516,18 @@ class Detector:
 
     def signal_column(self, kinds=SIGNAL_KINDS):
         """Nucleon column of the signal volume [1/cm^2]."""
-        return sum(m.material.N * m.thickness for m in self.modules
-                   if m.kind in kinds)
+        return sum(m.material.N * m.thickness for m in self.modules if m.kind in kinds)
 
-    def signal_interactions(self, sim, nuflavor=None, sign=+1, exposure=1.0,
-                            dist=None, xsec=None, kinds=SIGNAL_KINDS):
+    def signal_interactions(
+        self,
+        sim,
+        nuflavor=None,
+        sign=+1,
+        exposure=1.0,
+        dist=None,
+        xsec=None,
+        kinds=SIGNAL_KINDS,
+    ):
         """Neutrino interactions per exposure in the signal volume.
 
         Sums per volume, since each carries its own nucleon density. ``xsec``
@@ -403,6 +536,7 @@ class Detector:
         (use :meth:`cc_correction` if a CC-only rate needs it).
         """
         from mint import xsecs as _xs
+
         flavor = nuflavor or sim.nuflavor
         rays = dt.sim_rays(sim)
         E = np.asarray(sim.pnu["E"])
@@ -423,8 +557,9 @@ class Detector:
         """
         D = self.dist if dist is None else dist
         mat = material if material is not None else self.gas
-        segs = self._segments(Module("tpc", self.Z_TPC0, self.Z_TPC1, mat, "gas"),
-                              dist=D)
+        segs = self._segments(
+            Module("tpc", self.Z_TPC0, self.Z_TPC1, mat, "gas"), dist=D
+        )
         a, b, r0, r1 = segs[0]
         if sign > 0:
             return dt.ConeVolume(mat, z0=D + a, z1=D + b, r0=r0, r1=r1, name="TPC")
@@ -448,14 +583,12 @@ class Detector:
         counts. Pass ``kinds=TRACKING_KINDS`` for everything upstream of the
         calorimeter, or an explicit tuple for anything else."""
         kinds = SIGNAL_KINDS if kinds is None else kinds
-        return sum(m.material.N * m.thickness for m in self.modules
-                   if m.kind in kinds)
+        return sum(m.material.N * m.thickness for m in self.modules if m.kind in kinds)
 
     def electron_column(self, kinds=None):
         """On-axis electron column [1/cm^2] of the signal volume by default."""
         kinds = SIGNAL_KINDS if kinds is None else kinds
-        return sum(m.material.e * m.thickness for m in self.modules
-                   if m.kind in kinds)
+        return sum(m.material.e * m.thickness for m in self.modules if m.kind in kinds)
 
     def radiation_lengths(self, kinds=None):
         """On-axis X0 budget of the selected modules."""
@@ -481,34 +614,40 @@ class Detector:
 
     def column_table(self):
         """Per-group summary: thickness, column, X0 and lambda_I."""
-        groups = [("halo tagger", ("tracker",)), ("vertex tracker", ("vertex",)),
-                  ("TPC gas", ("gas",)), ("TPC structure", ("structure",)),
-                  ("calorimeter", ("absorber",)), ("muon spectrometer", ("air",))]
+        groups = [
+            ("halo tagger", ("tracker",)),
+            ("vertex tracker", ("vertex",)),
+            ("TPC gas", ("gas",)),
+            ("TPC structure", ("structure",)),
+            ("calorimeter", ("absorber",)),
+            ("muon spectrometer", ("air",)),
+        ]
         rows = []
         for label, kinds in groups:
             ms = [m for m in self.modules if m.kind in kinds]
             if not ms:
                 continue
-            rows.append({
-                "group": label,
-                "z0 [m]": min(m.z0 for m in ms) / 100,
-                "z1 [m]": max(m.z1 for m in ms) / 100,
-                "material [cm]": sum(m.thickness for m in ms),
-                "column [g/cm2]": self.column(kinds=kinds),
-                "X0": self.radiation_lengths(kinds=kinds),
-                "lambda_I": self.interaction_lengths(kinds=kinds),
-            })
+            rows.append(
+                {
+                    "group": label,
+                    "z0 [m]": min(m.z0 for m in ms) / 100,
+                    "z1 [m]": max(m.z1 for m in ms) / 100,
+                    "material [cm]": sum(m.thickness for m in ms),
+                    "column [g/cm2]": self.column(kinds=kinds),
+                    "X0": self.radiation_lengths(kinds=kinds),
+                    "lambda_I": self.interaction_lengths(kinds=kinds),
+                }
+            )
         return rows
 
     def cc_correction(self, Enu, nuflavor, kinds=None):
         """Column-weighted non-isoscalar CC correction of the SIGNAL volume.
 
-        Multiplies an isoscalar per-nucleon CC cross section. Tiny compared with
-        the old tungsten-slab detector: graphite (Z/A = 0.50) and argon
-        (Z/A = 0.45) are both close to isoscalar, so this stays within a
-        per-cent of unity instead of the +5%/-4% the tungsten slabs produced.
+        Multiplies an isoscalar per-nucleon CC cross section.
+        graphite (Z/A = 0.50) and argon (Z/A = 0.45)
         """
         from mint import xsecs
+
         kinds = SIGNAL_KINDS if kinds is None else kinds
         num, den = 0.0, 0.0
         for m in self.modules:
@@ -519,7 +658,8 @@ class Detector:
                 continue
             nuc = dt.dominant_nucleus(m.material)
             num = num + col * xsecs.cc_nonisoscalar_correction(
-                Enu, nuflavor, nuc.Z, nuc.A)
+                Enu, nuflavor, nuc.Z, nuc.A
+            )
             den = den + col
         return num / den if den > 0 else np.ones_like(np.asarray(Enu, float))
 
@@ -538,8 +678,7 @@ class Detector:
         return self.rock_length()
 
     # ---- flux helpers (same signatures as ForwardDetector) -----------------
-    def face_rays(self, sim, sign=+1, r_sel=None, E_min=0.0, exposure=1.0,
-                  dist=None):
+    def face_rays(self, sim, sign=+1, r_sel=None, E_min=0.0, exposure=1.0, dist=None):
         """Per-ray kinematics on the front-face plane, mirrored for the
         upstream (mu-) detector. ``r_sel`` defaults to the front-face aperture."""
         D = self.dist if dist is None else dist
@@ -562,12 +701,14 @@ class Detector:
         A convenience wrapper over :meth:`face_rays` that drops the positions
         and angles. Multiply ``exposure`` by injections per year to get a rate.
         """
-        E, w, *_ = self.face_rays(sim, sign=sign, E_min=E_min,
-                                  exposure=exposure, dist=dist)
+        E, w, *_ = self.face_rays(
+            sim, sign=sign, E_min=E_min, exposure=exposure, dist=dist
+        )
         return E, w
 
-    def flux_with_chords(self, sim, sign=+1, exposure=1.0, material=None,
-                         dist=None, kinds=SIGNAL_KINDS):
+    def flux_with_chords(
+        self, sim, sign=+1, exposure=1.0, material=None, dist=None, kinds=SIGNAL_KINDS
+    ):
         """(E, w, chord): rays crossing the selected modules, with the TOTAL
         chord summed over them.
 
@@ -580,8 +721,10 @@ class Detector:
         rays = dt.sim_rays(sim)
         vols = self.volumes(sign=sign, dist=dist, kinds=kinds)
         if material is not None:
-            vols = [dt.ConeVolume(material, v.z0, v.z1, v.r0, v.r1, name=v.name)
-                    for v in vols]
+            vols = [
+                dt.ConeVolume(material, v.z0, v.z1, v.r0, v.r1, name=v.name)
+                for v in vols
+            ]
         ch = np.zeros(np.asarray(sim.pnu["E"]).shape)
         for v in vols:
             ch = ch + v.intersect(*rays)[1]
@@ -598,10 +741,10 @@ class Detector:
         returned. Used by :mod:`mint.beamline` for the beamline density map.
         """
         D = self.dist if dist is None else dist
-        Zl = sign * np.asarray(Z, float) - D          # local z from the face
+        Zl = sign * np.asarray(Z, float) - D  # local z from the face
         Rr = np.asarray(R, float)
         for m in self.modules:
-            for (a, b, r0, r1) in self._segments(m, dist=D):
+            for a, b, r0, r1 in self._segments(m, dist=D):
                 if b <= a:
                     continue
                 k = (r1 - r0) / (b - a)
@@ -610,12 +753,14 @@ class Detector:
         return rho
 
     def __repr__(self):
-        return (f"Detector({self.name!r}: {self.length/100:.1f} m long, "
-                f"R = {self.radius/100:.2f}-{self.radius_back/100:.2f} m, "
-                f"{self.fiducial_length/100:.0f} m of "
-                f"{self.tpc_pressure_bar:.0f} bar Ar, vertex tracker "
-                f"{self.n_plates}x{self.plate_pitch:.0f} cm r<{self.vertex_radius:.0f} cm"
-                f" at {self.dist/1e5:.2f} km)")
+        return (
+            f"Detector({self.name!r}: {self.length/100:.1f} m long, "
+            f"R = {self.radius/100:.2f}-{self.radius_back/100:.2f} m, "
+            f"{self.fiducial_length/100:.0f} m of "
+            f"{self.tpc_pressure_bar:.0f} bar Ar, vertex tracker "
+            f"{self.n_plates}x{self.plate_pitch:.0f} cm r<{self.vertex_radius:.0f} cm"
+            f" at {self.dist/1e5:.2f} km)"
+        )
 
 
 # ---------------------------------------------------------------------------
