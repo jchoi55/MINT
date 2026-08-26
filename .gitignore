@@ -36,3 +36,10 @@ htmlcov/
 
 # Oversized vector density map; pending rasterization (see follow-up)
 MINT_examples/plots/beamline_density_map.pdf
+
+# Local-only GENIE cross-checks. These need a GENIE installation and its
+# cross-section splines, neither of which ships with MINT.
+# Scoped to the example folders on purpose: a bare "test_*" would also match
+# tests/test_mint.py and friends, which ARE part of the repository.
+MINT_examples/test_*
+physics_studies/test_*
