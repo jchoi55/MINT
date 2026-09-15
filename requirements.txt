@@ -2,6 +2,7 @@ matplotlib>=3.8
 numpy>=2.0
 pandas>=2.2
 scipy>=1.13
-vegas>=6.2
+vegas>=6.2,<6.4; python_version < '3.11'
+vegas>=6.2; python_version >= '3.11'
 vector>=1.6
 pytest>=8
