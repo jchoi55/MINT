@@ -22,6 +22,7 @@ The pieces you are most likely to touch:
 ``mint.MuC``         :class:`MuDecaySimulator`, the event generator itself
 ``mint.xsecs``       neutrino cross sections (switchable backends)
 ``mint.plot_tools``  figure styling used by the example notebooks
+``mint.genie_tools`` export a flux for GENIE event generation
 ===================  =======================================================
 """
 
@@ -43,6 +44,7 @@ from mint import detectors
 from mint import beamline
 from mint import beams
 from mint import plot_tools
+from mint import genie_tools
 
 # The two classes most users construct directly.
 from mint.lattice_tools import Lattice
@@ -61,6 +63,7 @@ __all__ = [
     "beamline",
     "beams",
     "plot_tools",
+    "genie_tools",
     "Lattice",
     "MuDecaySimulator",
 ]

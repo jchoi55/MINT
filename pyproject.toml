@@ -46,6 +46,10 @@ dev = [
 ct18 = [
   "parton",
 ]
+# Writing GENIE flux histograms (mint.genie_tools.write_flux_root)
+genie = [
+  "uproot>=5",
+]
 # Extra tools used by the physics case studies in physics-examples/
 # (deliberately NOT dependencies of mint itself)
 examples = [

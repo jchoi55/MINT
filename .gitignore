@@ -36,3 +36,6 @@ htmlcov/
 
 # Oversized vector density map; pending rasterization (see follow-up)
 MINT_examples/plots/beamline_density_map.pdf
+
+# GENIE event samples generated from the exported fluxes (large, reproducible)
+MINT_examples/data/genie/runs/
