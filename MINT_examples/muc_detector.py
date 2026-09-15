@@ -58,8 +58,11 @@ REGIONS = [
 
     # --- hadronic calorimeter ---------------------------------------------
     ("hcal_barrel",     dt.hcal_CLICdet,  174.0, 333.0,  -221.0, 221.0),
-    ("hcal_endcap_up",  dt.hcal_CLICdet,   56.8, 324.6,  -412.9, -235.4),
-    ("hcal_endcap_dn",  dt.hcal_CLICdet,   56.8, 324.6,   235.4, 412.9),
+    # Two slabs, not one: between |z| = 235.4 and 250.9 the ECAL endcap fills
+    # r = 33.9-170, so the HCAL there starts at 170. Merging them would overlap
+    # the ECAL and double-count the material forward rays cross.
+    ("hcal_endcap1_up", dt.hcal_CLICdet,  170.0, 324.6,  -250.9, -235.4),
+    ("hcal_endcap1_dn", dt.hcal_CLICdet,  170.0, 324.6,   235.4, 250.9),
 
     # --- solenoid: two iron flux returns around an aluminium coil ---------
     ("solenoid_inner",  dt.Fe,            348.3, 352.3,  -412.9, 412.9),
@@ -142,6 +145,43 @@ def nozzle_volumes(material=dt.W, r_bore=BEAM_PIPE_RADIUS):
     return vols
 
 
+#: HCAL endcap 2 (|z| 250.9-412.9) is bounded outside by r = 324.6 and inside
+#: by the nozzle, whose radius runs 33.9 -> 56.8 across that span.
+HCAL_ENDCAP2 = (250.9, 412.9, 33.9, 56.8, 324.6)
+
+
+class ConicalBoreTube:
+    """A cylinder with a conical bore: the difference of two MINT volumes.
+
+    Used for the HCAL endcap, whose inner boundary follows the nozzle rather
+    than being a constant radius.
+    """
+
+    def __init__(self, material, z0, z1, r_bore0, r_bore1, r_out, name="tube"):
+        self.material = material
+        self.name = name
+        self._outer = dt.CylinderVolume(material, radius=r_out, length=z1 - z0,
+                                        center=(0.0, 0.0, 0.5 * (z0 + z1)),
+                                        name=name + "_outer")
+        self._bore = dt.ConeVolume(material, z0=z0, z1=z1,
+                                   r0=r_bore0, r1=r_bore1, name=name + "_bore")
+
+    def intersect(self, origin, direction):
+        t, c_out = self._outer.intersect(origin, direction)
+        _, c_bore = self._bore.intersect(origin, direction)
+        return t, np.maximum(c_out - c_bore, 0.0)
+
+    def contains(self, x, y, z):
+        return self._outer.contains(x, y, z) & ~self._bore.contains(x, y, z)
+
+
+def hcal_endcap2_volumes(material=dt.hcal_CLICdet):
+    """The outer HCAL endcaps, bored out along the nozzle profile."""
+    z0, z1, rb0, rb1, r_out = HCAL_ENDCAP2
+    return [ConicalBoreTube(material, z0, z1, rb0, rb1, r_out, name="hcal_endcap2_dn"),
+            ConicalBoreTube(material, -z1, -z0, rb1, rb0, r_out, name="hcal_endcap2_up")]
+
+
 def muc_detector(name="muc_detector", with_nozzle=True):
     """The muon-collider detector as a :class:`mint.detector_tools.VolumeStack`.
 
@@ -152,7 +192,7 @@ def muc_detector(name="muc_detector", with_nozzle=True):
         neutrino sees, so switching them off is a useful way to isolate what
         the calorimeters alone contribute.
     """
-    vols = [_tube(*r) for r in REGIONS]
+    vols = [_tube(*r) for r in REGIONS] + hcal_endcap2_volumes()
     if with_nozzle:
         vols += nozzle_volumes()
     return dt.VolumeStack(vols, name=name)

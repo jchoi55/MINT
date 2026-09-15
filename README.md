@@ -2,6 +2,7 @@
 
 [![tests](https://github.com/jchoi55/MINT/actions/workflows/tests.yml/badge.svg)](https://github.com/jchoi55/MINT/actions/workflows/tests.yml)
 [![codecov](https://codecov.io/gh/jchoi55/MINT/branch/main/graph/badge.svg)](https://codecov.io/gh/jchoi55/MINT)
+[![InspireHEP](https://img.shields.io/badge/InspireHEP-Choi:2608.02718-dodgerblue.svg)](https://arxiv.org/abs/2608.02718 )
 
 <img src="assets/mint-logo.svg" alt="MINT logo" width="120" />
 
@@ -148,7 +149,18 @@ If you find something wrong, please open an issue or contact us directly.
 
 ## Citation
 
-If you use MINT, please cite the accompanying paper (TBD)
+If you use MINT, please cite the accompanying paper: 
+```
+@article{Choi:2026yzw,
+    author = "Choi, Ju-Yeol and Hostert, Matheus and Li, Peiran and Liu, Zhen",
+    title = "{The Forward Neutrino Flux and its Secondaries at a 10 TeV Muon Collider}",
+    eprint = "2608.02718",
+    archivePrefix = "arXiv",
+    primaryClass = "hep-ph",
+    month = "8",
+    year = "2026"
+}
+```
 
 
 ## Building distributions
