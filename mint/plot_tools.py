@@ -33,7 +33,13 @@ rcparams = {
 if shutil.which("latex"):
     plt.rcParams["text.latex.preamble"] = r"\usepackage{amsmath}\usepackage{amssymb}"
     rc("text", usetex=True)
-rc("font", **{"family": "serif", "serif": ["Computer Modern Roman"]})
+if shutil.which("latex"):
+    # When LaTeX is available, prefer Computer Modern but include fallbacks.
+    rc("font", **{"family": "serif", "serif": ["Computer Modern Roman", "DejaVu Serif", "Times New Roman"]})
+else:
+    # Avoid Matplotlib searching for Computer Modern when LaTeX is not available;
+    # prefer commonly installed serif fonts to prevent findfont warnings/errors.
+    rc("font", **{"family": "serif", "serif": ["DejaVu Serif", "Times New Roman", "serif"]})
 matplotlib.rcParams["hatch.linewidth"] = 0.3
 
 rcParams.update(rcparams)
