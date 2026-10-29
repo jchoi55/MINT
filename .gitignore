@@ -13,6 +13,7 @@ __pycache__/
 build/
 dist/
 *.egg-info/
+mint/tauola/tau_decay
 # macOS
 **/.DS_Store
 

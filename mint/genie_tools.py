@@ -771,9 +771,23 @@ def run_gevgen(
         rc2, _ = _run_logged(argv, jobdir, install.env(),
                              os.path.join(jobdir, "gntpc.log"), tail_lines)
         result["gntpc_returncode"] = rc2
-        if rc2 == 0:
+        # gntpc exits 0 even when it finds no event tree to convert (it logs
+        # "Null input GHEP event tree" and writes an empty file), which is what a
+        # gevgen killed mid-run leaves behind.  Check the tree is really there.
+        result["n_written"] = _gst_entries(gst) if rc2 == 0 else 0
+        if rc2 == 0 and result["n_written"] >= int(n_events):
             result["gst"] = gst
     return result
+
+
+def _gst_entries(path):
+    """Number of events in a gst file, or 0 if it has no readable ``gst`` tree."""
+    import uproot
+    try:
+        with uproot.open(path) as f:
+            return int(f["gst"].num_entries)
+    except Exception:
+        return 0
 
 
 def run_gevgen_all(
@@ -785,13 +799,16 @@ def run_gevgen_all(
     seed=1,
     target=AR40,
     max_workers=None,
+    retries=1,
     **kwargs,
 ):
     """:func:`run_gevgen` for several flavors at once, one process each.
 
     ``n_events`` is a number or a per-flavor dict.  Jobs get distinct run
     numbers and seeds (``seed + i``).  Each loads the spline file on its own,
-    so expect ~10 s of start-up per job on top of the generation time.
+    so expect ~10 s of start-up per job on top of the generation time.  Jobs
+    whose output does not hold the requested events are rerun sequentially,
+    up to ``retries`` times.
     """
     flavors = list(flavors)
     max_workers = max_workers or len(flavors)
@@ -806,8 +823,17 @@ def run_gevgen_all(
         )
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as pool:
-        results = list(pool.map(_one, enumerate(flavors)))
-    return {r["flavor"]: r for r in results}
+        results = {r["flavor"]: r for r in pool.map(_one, enumerate(flavors))}
+
+    # A job that died under the load of the parallel batch (the usual failure) is
+    # rerun on its own; anything still failing after that is reported as such.
+    for _ in range(retries):
+        failed = [(i, fl) for i, fl in enumerate(flavors) if not results[fl]["gst"]]
+        if not failed:
+            break
+        for i_flavor in failed:
+            results[i_flavor[1]] = _one(i_flavor)
+    return results
 
 
 # The gst branches a rate study needs.  The full tree has ~130; ask for more

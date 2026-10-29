@@ -437,7 +437,7 @@ def create_RLA_lattice(
     which_pass = np.append(which_pass, np.full(7 * n_points_per_element, 4))
 
     # Fifth and final pass
-    x_5 = np.linspace(straight_length / 2, -straight_length / 2, n_points_per_element)
+    x_5 = np.linspace(-straight_length / 2, straight_length / 2, n_points_per_element)
     y_5 = np.full_like(x_5, 0)
     s_length = np.append(s_length, get_s_element(x_5, y_5))
     dpdx = np.append(dpdx, np.full(n_points_per_element, dp_dx_LA))
@@ -531,21 +531,16 @@ def create_RLA_lattice(
 
     if beam_dyn:
 
-        # example user parameters for the straight segments (a,b) per straight pass
-        # these are just examples — replace with your desired a,b values per straight
-        straight_params = [
-            [0.000000e00, 8.290000e04],  # seg 1  (s_start, s_end)
-            [2.805025e05, 3.634025e05],  # seg 9
-            [5.809080e05, 6.638080e05],  # seg 17
-            [9.264227e05, 1.009323e06],  # seg 25
-            [1.380230e06, s[-1]],  # seg 33 (final straight)
-        ]
-
-        for seg in straight_params:
-
-            mask = (s >= seg[0]) & (s <= seg[1])
-            beta[mask] = 0.0105498 * s[mask] + 21.5768e2
-        print(beta)
+        # Beta grows linearly along the linac straights and sits at the small default
+        # everywhere else.  The straights are wherever the beam is being accelerated,
+        # so read them off dpdx (per interval; a point is on a straight if either
+        # interval touching it accelerates) rather than from hard-coded arc lengths,
+        # which silently go stale whenever the pass geometry changes.
+        accelerating = dpdx > 0
+        on_straight = np.zeros(s.size, dtype=bool)
+        on_straight[:-1] |= accelerating
+        on_straight[1:] |= accelerating
+        beta[on_straight] = 0.0105498 * s[on_straight] + 21.5768e2
 
         emittance = 25e-3  # [cm-rad]
 
