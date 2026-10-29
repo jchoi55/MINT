@@ -1,0 +1,103 @@
+{
+  "generator": "MINT 0.4.1.dev2+g167b79e9c (mint.genie_tools)",
+  "created": "2026-10-07T03:45:37-05:00",
+  "flux_units": "neutrinos / cm^2 / GeV / year",
+  "energy_units": "GeV",
+  "resampling": {
+    "method": "none (input already on the output grid)",
+    "input_bins": 700,
+    "input_range_GeV": [
+      0.0,
+      70.0
+    ],
+    "output_bins": 700,
+    "output_range_GeV": [
+      0.0,
+      70.0
+    ],
+    "bin_width_GeV": 0.1
+  },
+  "genie_target_pdg": 1000180400,
+  "normalization": {
+    "nue": {
+      "pdg": 12,
+      "histogram": "flux_nue",
+      "flux_integral": 6159.153310458675,
+      "flux_fraction": 0.0027698344800909202,
+      "events_per_year": 878.9676050685981,
+      "n_events": 100000,
+      "weight_per_event": 0.008789676050685981,
+      "events_per_year_input_grid": 878.9676050685981
+    },
+    "nuebar": {
+      "pdg": -12,
+      "histogram": "flux_nuebar",
+      "flux_integral": 1094029.0716689813,
+      "flux_fraction": 0.49199610598829835,
+      "events_per_year": 177828.83999184484,
+      "n_events": 100000,
+      "weight_per_event": 1.7782883999184484,
+      "events_per_year_input_grid": 177828.83999184484
+    },
+    "numu": {
+      "pdg": 14,
+      "histogram": "flux_numu",
+      "flux_integral": 991834.7848839487,
+      "flux_fraction": 0.4460382859865093,
+      "events_per_year": 404079.49919995194,
+      "n_events": 100000,
+      "weight_per_event": 4.040794991999519,
+      "events_per_year_input_grid": 404079.49919995194
+    },
+    "numubar": {
+      "pdg": -14,
+      "histogram": "flux_numubar",
+      "flux_integral": 5045.5459476752785,
+      "flux_fraction": 0.00226903381557704,
+      "events_per_year": 351.6050631657898,
+      "n_events": 100000,
+      "weight_per_event": 0.0035160506316578976,
+      "events_per_year_input_grid": 351.6050631657898
+    },
+    "nutau": {
+      "pdg": 16,
+      "histogram": "flux_nutau",
+      "flux_integral": 120398.31063967661,
+      "flux_fraction": 0.054144356430971693,
+      "events_per_year": 16384.937182975755,
+      "n_events": 100000,
+      "weight_per_event": 0.16384937182975753,
+      "events_per_year_input_grid": 16384.937182975755
+    },
+    "nutaubar": {
+      "pdg": -16,
+      "histogram": "flux_nutaubar",
+      "flux_integral": 6187.0575398727115,
+      "flux_fraction": 0.0027823832985527245,
+      "events_per_year": 413.30016261804246,
+      "n_events": 100000,
+      "weight_per_event": 0.004133001626180424,
+      "events_per_year_input_grid": 413.30016261804246
+    }
+  },
+  "machine": "RLA2",
+  "detector_side": "+z",
+  "beam": "mu- (born as nu_mu + nubar_e)",
+  "baseline_km": 1300,
+  "flux_sampled_at_km": 2.030917620904737,
+  "sampling_face_radius_cm": 170.3043306342217,
+  "detector_radius_cm": 10500.0,
+  "detector_column_density_g_cm2": 9217.6,
+  "target_nucleons": 1.9087477747918905e+36,
+  "bunches_per_year": 50225480.32116797,
+  "oscillation_parameters": {
+    "theta12_deg": 33.68,
+    "theta13_deg": 8.56,
+    "theta23_deg": 43.3,
+    "delta_cp_deg": 212.0,
+    "dm21_eV2": 7.49e-05,
+    "dm31_eV2": 0.002513
+  },
+  "matter_density_g_cm3": 2.848,
+  "caveat": "events_per_year and weight_per_event use mint.xsecs' DIS tables, linearly extrapolated below their 50 GeV edge (see section 4). GENIE computes the cross section properly, so normalizing through flux_integral x <sigma>_GENIE x target_nucleons is the better route."
+}
